@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Strudel Vibe Coding</title>
+    <script src="https://unpkg.com/@strudel/repl@1.3.0"></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #101214;
+        color: #f4f1ea;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        overflow: hidden;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 18px;
+        border-bottom: 1px solid #2d3338;
+        background: #171a1d;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 650;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      button {
+        border: 1px solid #59636c;
+        border-radius: 6px;
+        background: #252b30;
+        color: #f4f1ea;
+        padding: 8px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #303840;
+      }
+
+      #status {
+        min-width: 220px;
+        color: #b8c0c7;
+        font-size: 13px;
+        text-align: right;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        min-height: 0;
+      }
+
+      #repl-host {
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      strudel-editor {
+        display: none;
+      }
+
+      #repl-host > div {
+        height: 100%;
+      }
+
+      #repl-host .cm-editor {
+        height: 100%;
+      }
+
+      #repl-host .cm-scroller {
+        overflow: auto;
+      }
+
+      aside {
+        border-left: 1px solid #2d3338;
+        padding: 18px;
+        background: #171a1d;
+        color: #c5cbd1;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      aside p {
+        margin: 0 0 12px;
+      }
+
+      code {
+        color: #f1d27a;
+      }
+
+      @media (max-width: 760px) {
+        header {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .controls {
+          justify-content: space-between;
+        }
+
+        #status {
+          min-width: 0;
+          text-align: left;
+        }
+
+        main {
+          grid-template-columns: 1fr;
+        }
+
+        aside {
+          border-left: 0;
+          border-top: 1px solid #2d3338;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Local Strudel Vibe Coding</h1>
+      <div class="controls">
+        <button id="evaluate" type="button">Evaluate</button>
+        <button id="stop" type="button">Stop</button>
+        <div id="status">Waiting for track...</div>
+      </div>
+    </header>
+    <main>
+      <div id="repl-host">
+        <strudel-editor id="repl"></strudel-editor>
+      </div>
+      <aside>
+        <p>Edit <code>track.strudel.js</code>. The browser reloads the pattern whenever the file changes.</p>
+        <p>Edit in this REPL and evaluate to write the code back to disk.</p>
+      </aside>
+    </main>
+    <script>
+      const statusEl = document.querySelector('#status');
+      const replEl = document.querySelector('#repl');
+      const evaluateButton = document.querySelector('#evaluate');
+      const stopButton = document.querySelector('#stop');
+      let latestCode = '';
+      let editor = null;
+      let applyingRemoteCode = false;
+      let playbackArmed = false;
+
+      function waitForEditor() {
+        return new Promise((resolve) => {
+          const tick = () => {
+            if (replEl.editor) {
+              resolve(replEl.editor);
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          tick();
+        });
+      }
+
+      async function saveEditorCode() {
+        if (!editor || applyingRemoteCode) {
+          return;
+        }
+        await fetch('/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: editor.code }),
+        });
+        statusEl.textContent = `Saved ${new Date().toLocaleTimeString()}`;
+      }
+
+      async function applyTrack(code) {
+        latestCode = code;
+        if (!editor) {
+          statusEl.textContent = 'Loaded. Waiting for REPL.';
+          return;
+        }
+
+        try {
+          applyingRemoteCode = true;
+          editor.setCode(code);
+          if (playbackArmed) {
+            await editor.evaluate();
+          }
+          applyingRemoteCode = false;
+          statusEl.textContent = playbackArmed
+            ? `Applied ${new Date().toLocaleTimeString()}`
+            : 'Loaded. Click Evaluate.';
+        } catch (error) {
+          applyingRemoteCode = false;
+          statusEl.textContent = error.message;
+          console.error(error);
+        }
+      }
+
+      waitForEditor().then((loadedEditor) => {
+        editor = loadedEditor;
+        const originalEvaluate = editor.evaluate.bind(editor);
+        editor.evaluate = async (...args) => {
+          await saveEditorCode();
+          return originalEvaluate(...args);
+        };
+        statusEl.textContent = 'REPL ready.';
+        if (latestCode) {
+          applyTrack(latestCode);
+        }
+      });
+
+      evaluateButton.addEventListener('click', async () => {
+        playbackArmed = true;
+        await editor?.evaluate();
+        statusEl.textContent = `Playing ${new Date().toLocaleTimeString()}`;
+      });
+
+      stopButton.addEventListener('click', async () => {
+        playbackArmed = false;
+        await editor?.stop();
+        statusEl.textContent = 'Stopped';
+      });
+
+      const source = new EventSource('/events');
+      source.addEventListener('track', (event) => {
+        const payload = JSON.parse(event.data);
+        applyTrack(payload.code);
+      });
+      source.addEventListener('error', () => {
+        statusEl.textContent = 'Event stream disconnected';
+      });
+    </script>
+  </body>
+</html>
