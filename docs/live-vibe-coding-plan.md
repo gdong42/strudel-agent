@@ -140,7 +140,7 @@ The architecture has three core responsibilities:
 - Runtime layer: keep the official Strudel REPL as the executable music surface for the first formal version.
 - Recovery layer: preserve history, snapshots, staged changes, and the latest safe fallback so live performance remains reversible.
 
-The LLM provider is replaceable. Codex, an OpenAI API model, or a local model can back the agent service, but the agent workflow itself is a core product capability rather than an optional bridge.
+The model/API provider is replaceable. OpenAI, Anthropic, local models, or other API providers can back the agent service, but the agent workflow itself is a core product capability rather than an optional bridge.
 
 ## State And Performance Safety Model
 
@@ -215,17 +215,22 @@ Initial formal project layout:
 
 ```text
 .
+├─ backend/
+│  ├─ pyproject.toml
+│  └─ app/
+│     ├─ main.py
+│     ├─ agent.py
+│     ├─ changes.py
+│     ├─ tracks.py
+│     ├─ snapshots.py
+│     ├─ samples.py
+│     ├─ config.py
+│     ├─ models.py
+│     └─ providers/
 ├─ src/
-│  ├─ server/
-│  │  ├─ index.ts
-│  │  ├─ agent.ts
-│  │  ├─ changes.ts
-│  │  ├─ files.ts
-│  │  ├─ snapshots.ts
-│  │  ├─ samples.ts
-│  │  └─ config.ts
 │  └─ client/
 │     ├─ agent.ts
+│     ├─ bridge.ts
 │     ├─ diff.ts
 │     ├─ main.ts
 │     ├─ repl.ts
@@ -239,10 +244,12 @@ Initial formal project layout:
 ├─ project.config.json
 ├─ agent-context.md
 ├─ docs/
-└─ package.json
+├─ package.json
+├─ tsconfig.json
+└─ vite.config.ts
 ```
 
-The current single-file POC can stay as a reference, but formal development should move to TypeScript and explicit modules.
+The current single-file POC can stay as a reference, but formal development should move to a Python FastAPI backend, TypeScript/Vite frontend, and explicit modules.
 
 ## Development Plan
 
