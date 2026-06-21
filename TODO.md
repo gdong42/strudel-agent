@@ -2,16 +2,16 @@
 
 ## Phase 1: REPL Runtime Shell
 
-- [ ] **P1.1** Scaffold frontend Vite + TypeScript project (`package.json`, `tsconfig.json`, `vite.config.ts`)
-- [ ] **P1.2** Pin `@strudel/repl@1.3.0` and create minimal `index.html` entry
-- [ ] **P1.3** Implement `src/client/repl.ts` adapter (getCode, setCode, evaluate, stop, onUpdate)
-- [ ] **P1.4** Scaffold Python FastAPI backend (`backend/pyproject.toml`, `backend/app/main.py`)
-- [ ] **P1.5** Implement `backend/app/tracks.py` (read/write `tracks/main.strudel.js`)
-- [ ] **P1.6** Add Evaluate, Stop, Panic buttons in the UI
-- [ ] **P1.7** Implement `src/client/status.ts` (connection status, last evaluate time, errors)
-- [ ] **P1.8** Implement `src/client/bridge.ts` (SSE listener, POST `/track` helper)
-- [ ] **P1.9** Implement `src/client/main.ts` (bootstrap, wire UI to adapter and bridge)
-- [ ] **P1.10** Migrate POC `track.strudel.js` content to `tracks/main.strudel.js`
+- [x] **P1.1** Scaffold frontend Vite + TypeScript project (`package.json`, `tsconfig.json`, `vite.config.ts`)
+- [x] **P1.2** Pin `@strudel/repl@1.3.0` and create minimal `index.html` entry
+- [x] **P1.3** Implement `src/client/repl.ts` adapter (getCode, setCode, evaluate, stop, onUpdate)
+- [x] **P1.4** Scaffold Python FastAPI backend (`backend/pyproject.toml`, `backend/app/main.py`)
+- [x] **P1.5** Implement `backend/app/tracks.py` (read/write `tracks/main.strudel.js`)
+- [x] **P1.6** Add Evaluate, Stop, Panic buttons in the UI
+- [x] **P1.7** Implement `src/client/status.ts` (connection status, last evaluate time, errors)
+- [x] **P1.8** Implement `src/client/bridge.ts` (SSE listener, POST `/track` helper)
+- [x] **P1.9** Implement `src/client/main.ts` (bootstrap, wire UI to adapter and bridge)
+- [x] **P1.10** Migrate POC `track.strudel.js` content to `tracks/main.strudel.js`
 
 ## Phase 2: State, History, and Recovery
 

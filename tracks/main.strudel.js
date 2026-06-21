@@ -11,11 +11,11 @@ const mood = {
   ],
 };
 
-// 124 BPM, treating one cycle as one four-beat bar.
+// 128 BPM, treating one cycle as one four-beat bar.
 setcpm(mood.bpm / 4);
 
 stack(
-  s("bd*4 [bd ~]") 
+  s("bd*4 [bd ~]")
     .gain(0.78)
     .color('white')
     .punchcard({

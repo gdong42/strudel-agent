@@ -2,3 +2,8 @@
 node_modules/
 dist/
 .env
+.uv-cache/
+.venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
