@@ -7,3 +7,8 @@ dist/
 backend/.venv/
 __pycache__/
 *.py[cod]
+snapshots/*.json
+changes/*.json
+.e2e-workspace/
+test-results/
+playwright-report/

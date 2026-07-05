@@ -6,6 +6,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/events': 'http://127.0.0.1:8787',
+      '/snapshots': 'http://127.0.0.1:8787',
+      '/state': 'http://127.0.0.1:8787',
       '/track': 'http://127.0.0.1:8787',
     },
   },

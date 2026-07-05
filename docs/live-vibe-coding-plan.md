@@ -24,6 +24,21 @@ The first formal version should therefore preserve the official Strudel REPL as 
 - Progressive disclosure: beginners can stay in natural language and high-level controls; experienced Strudel users can work directly in the editor.
 - Local-first for performance: the live runtime should not depend on network availability once required packages and samples are available.
 
+## Delivery Model
+
+The first formal product should be a local-first workspace tool, not a hosted cloud service. A user runs the app on their own machine, and the backend serves the local browser session, local track files, snapshots, changes, samples, and project config.
+
+This keeps the live runtime predictable for performance and avoids prematurely introducing accounts, cloud storage, permissions, hosted API-key custody, billing, and abuse controls before the agent workflow is proven.
+
+The data model should still be compatible with a future hosted product:
+
+- A `project` is a local workspace directory in the first version.
+- A `session` is the current browser/backend runtime state for that workspace.
+- `project_id` and `session_id` can exist as local identifiers now, without implying a user account.
+- Tracks, snapshots, changes, and agent metadata should be stored through explicit project/session APIs rather than hidden global state.
+
+If the product later moves toward a strudel.cc-style hosted experience, the same concepts can map to database-backed users, projects, sessions, assets, and shareable performances.
+
 ## Target Experience
 
 The mature experience should support several modes without treating them as separate products:

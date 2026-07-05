@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .paths import track_path
 
-ROOT = Path(__file__).resolve().parents[2]
-TRACK_PATH = ROOT / "tracks" / "main.strudel.js"
+TRACK_PATH = track_path()
 
 
 def read_track() -> str:

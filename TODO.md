@@ -15,16 +15,16 @@
 
 ## Phase 2: State, History, and Recovery
 
-- [ ] **P2.1** Define `backend/app/models.py` with Pydantic state and API models
-- [ ] **P2.2** Implement `src/client/state.ts` state machine (activeCode, editorCode, lastGoodCode, transitions from §4.2)
-- [ ] **P2.3** Implement `backend/app/snapshots.py` (create on evaluate, list, pruning: max 50 or 24h)
-- [ ] **P2.4** Implement `src/client/recovery.ts` (revert-to-lastGood button, error display)
-- [ ] **P2.5** Add dirty-editor detection (expose `isDirty` from adapter, warn on agent stage if dirty)
-- [ ] **P2.6** Remove POC auto-overwrite behavior from SSE track events (agent staging uses separate channel)
-- [ ] **P2.7** Add preflight guards: empty code check, single-quote mini-notation warning
-- [ ] **P2.8** Targeted test: verify failed `editor.evaluate()` does not stop the running scheduler
-- [ ] **P2.9** Implement `backend/app/config.py` (load `project.config.json`, apply defaults)
-- [ ] **P2.10** Add snapshot list UI and one-click revert to any snapshot
+- [x] **P2.1** Define local-first `backend/app/models.py` with project/session, track, and snapshot API models
+- [x] **P2.2** Implement `src/client/state.ts` state machine (projectId, sessionId, activeCode, editorCode, lastGoodCode)
+- [x] **P2.3** Implement `backend/app/snapshots.py` (create on successful evaluate, list, revert, pruning: max 50 or 24h)
+- [x] **P2.4** Implement `src/client/recovery.ts` (revert-to-lastGood button, snapshot revert, error display)
+- [x] **P2.5** Add dirty-editor detection (expose `isDirty` from adapter, warn on agent stage if dirty)
+- [x] **P2.6** Remove POC auto-overwrite behavior from SSE track events (agent staging uses separate channel)
+- [x] **P2.7** Add preflight guards: empty code check, single-quote mini-notation warning
+- [x] **P2.8** Targeted test: verify failed `editor.evaluate()` does not overwrite `lastGoodCode`
+- [x] **P2.9** Implement `backend/app/config.py` (load `project.config.json`, apply defaults)
+- [x] **P2.10** Add snapshot list UI and one-click revert to any snapshot
 
 ## Phase 3: Agent Staging and Diff
 

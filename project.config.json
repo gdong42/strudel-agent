@@ -1,0 +1,20 @@
+{
+  "trackFile": "tracks/main.strudel.js",
+  "snapshots": {
+    "directory": "snapshots",
+    "maxCount": 50,
+    "maxAgeHours": 24
+  },
+  "agent": {
+    "provider": "mock",
+    "model": null,
+    "contextFile": "agent-context.md"
+  },
+  "samples": {
+    "registryPath": "samples"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787
+  }
+}

@@ -15,7 +15,19 @@
 | Agent providers | Provider adapter layer over direct model APIs | Avoid tying the product to one vendor SDK or hosted agent platform |
 | Config | `project.config.json` (JSON, loaded by backend at startup) | Human-writable, no env-var sprawl |
 
-## 2. Architecture Layers
+## 2. Delivery Model
+
+The first implementation is a local-first workspace app.
+
+- The user runs the frontend and backend on their own machine.
+- The backend is a local runtime backend for the current workspace, not a shared hosted service.
+- The current project maps to a local directory containing tracks, snapshots, changes, samples, config, and agent context.
+- The current session maps to the active browser/backend runtime state for that project.
+- No user account, cloud storage, multi-tenant permissions, billing, or hosted model-key custody is required in the first product version.
+
+Use explicit `project_id` and `session_id` fields in API/state models where useful, but treat them as local identifiers for now. This keeps the design portable to a future hosted app without paying the hosted complexity cost during the product-validation phase.
+
+## 3. Architecture Layers
 
 ```text
 ┌─────────────────────────────────────────────────┐
@@ -46,7 +58,7 @@
 └──────────────────────────────────────────────────┘
 ```
 
-## 3. REPL Adapter Interface
+## 4. REPL Adapter Interface
 
 ```typescript
 // src/client/repl.ts
@@ -70,11 +82,13 @@ interface ReplAdapter {
 
 The adapter wraps `strudel-editor.repl.editor` (CodeMirror instance). All DOM access and `waitForEditor()` polling stays inside this module.
 
-## 4. State Machine
+## 5. State Machine
 
-### 4.1 Core States
+### 5.1 Core States
 
 ```
+projectId        — local workspace identifier
+sessionId        — current browser/backend runtime session identifier
 activeCode       — last successfully evaluated code (currently performing)
 editorCode       — code visible in the REPL editor
 lastGoodCode     — most recent known safe fallback
@@ -82,7 +96,7 @@ preAgentCode     — editor contents immediately before latest agent stage
 changeSet        — metadata for latest agent-staged change
 ```
 
-### 4.2 State Transitions
+### 5.2 State Transitions
 
 | Event | activeCode | editorCode | lastGoodCode | preAgentCode | changeSet |
 |---|---|---|---|---|---|
@@ -93,7 +107,7 @@ changeSet        — metadata for latest agent-staged change
 | **Manual edit** | (unchanged) | ← user input | (unchanged) | (unchanged) | (unchanged) |
 | **Revert to lastGood** | ← lastGoodCode | ← lastGoodCode | (unchanged) | (cleared) | (cleared) |
 
-### 4.3 Evaluation Rules
+### 5.3 Evaluation Rules
 
 1. `Manual Fire` (default): agent stages into editor, user presses Ctrl+Enter to evaluate.
 2. `Auto Fire` (opt-in): agent stages into editor AND evaluates immediately after successful validation.
@@ -102,9 +116,9 @@ changeSet        — metadata for latest agent-staged change
 5. `Stop` halts playback and disables Auto Fire.
 6. `Panic` stops playback, clears visuals, and presents a confirm dialog before optionally reloading the REPL iframe.
 
-## 5. Agent API Contract
+## 6. Agent API Contract
 
-### 5.1 Agent Code Model Decision
+### 6.1 Agent Code Model Decision
 
 **Agent operates directly on Strudel JS**, not on a higher-level song model that compiles to Strudel.
 
@@ -114,7 +128,7 @@ Rationale:
 - Advanced users need to inspect and edit agent output directly.
 - Revisit the song-model approach only if the agent consistently produces structural errors that a model layer would prevent.
 
-### 5.2 Change Format Decision
+### 6.2 Change Format Decision
 
 **Full-file replacement with a structured diff computed on the client.**
 
@@ -123,7 +137,7 @@ Rationale:
 - The client computes the diff for display using the CodeMirror merge extension.
 - `preAgentCode` + `editorCode` gives us the before/after pair needed for diff.
 
-### 5.3 Provider Strategy
+### 6.3 Provider Strategy
 
 The product should call model APIs through a narrow provider adapter instead of binding the core workflow to a platform-specific agent SDK.
 
@@ -147,7 +161,7 @@ Initial provider examples:
 - `AnthropicProvider`: direct Anthropic API call with structured output.
 - `MockProvider`: deterministic local provider for tests and UI development.
 
-### 5.4 POST /changes — Request
+### 6.4 POST /changes — Request
 
 ```python
 # POST /changes
@@ -166,7 +180,7 @@ class ChangeRequest(BaseModel):
     apply_mode: Literal["manual", "auto"]
 ```
 
-### 5.5 POST /changes — Response
+### 6.5 POST /changes — Response
 
 ```python
 class ChangeResponse(BaseModel):
@@ -193,7 +207,7 @@ class ChangeWarning(BaseModel):
     category: Literal["sample", "visual", "structure", "performance", "mini-notation"]
 ```
 
-### 5.6 Auto Fire Validation
+### 6.6 Auto Fire Validation
 
 Before auto-evaluating in `Auto Fire` mode, the server validates:
 1. Code is non-empty.
@@ -203,13 +217,14 @@ Before auto-evaluating in `Auto Fire` mode, the server validates:
 
 If validation fails with warnings at `risk` level, the change is staged but NOT auto-evaluated — the user is prompted.
 
-## 6. Module Responsibilities
+## 7. Module Responsibilities
 
-### 6.1 Server Modules
+### 7.1 Server Modules
 
 | Module | Responsibility |
 |---|---|
 | `backend/app/main.py` | FastAPI app setup, route registration, SSE management |
+| `backend/app/models.py` | Pydantic request/response/project/session state models |
 | `backend/app/tracks.py` | Track file I/O (read from `tracks/`, write to `tracks/`) |
 | `backend/app/snapshots.py` | Snapshot CRUD, pruning (keep last 50 or 24h) |
 | `backend/app/changes.py` | `POST /changes`, `GET /changes/latest`, `POST /changes/:id/undo` |
@@ -217,9 +232,8 @@ If validation fails with warnings at `risk` level, the change is staged but NOT 
 | `backend/app/providers/` | Vendor-specific direct API adapters behind a stable provider interface |
 | `backend/app/samples.py` | Sample registry (list known sample names from `samples/` config) |
 | `backend/app/config.py` | Load and watch `project.config.json` |
-| `backend/app/models.py` | Pydantic request/response/state models |
 
-### 6.2 Client Modules
+### 7.2 Client Modules
 
 | Module | Responsibility |
 |---|---|
@@ -232,20 +246,22 @@ If validation fails with warnings at `risk` level, the change is staged but NOT 
 | `client/bridge.ts` | SSE listener, HTTP helpers, reconnect logic |
 | `client/main.ts` | App bootstrap, glue |
 
-## 7. API Endpoints
+## 8. API Endpoints
 
 ```text
 GET  /events                     SSE stream (track updates, agent notifications)
 POST /track                      Save editor code to disk (from evaluate)
+GET  /state                      Current local project/session runtime state
 POST /changes                    Stage an agent change
 GET  /changes/latest             Get latest staged change metadata
 POST /changes/:id/undo           Undo a staged change (restore preAgentCode)
 GET  /snapshots                  List snapshots
+POST /snapshots                  Create snapshot after successful evaluate
 POST /snapshots/:id/revert       Revert to a snapshot
 GET  /samples                    List known samples
 ```
 
-## 8. File Layout (Revisited)
+## 9. File Layout (Revisited)
 
 ```text
 .
@@ -296,7 +312,7 @@ GET  /samples                    List known samples
 └── uv.lock
 ```
 
-## 9. project.config.json Schema
+## 10. project.config.json Schema
 
 ```json
 {

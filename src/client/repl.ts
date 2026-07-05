@@ -1,5 +1,3 @@
-import '@strudel/repl';
-
 type StrudelMirror = {
   code: string;
   setCode(code: string): void;
@@ -14,6 +12,8 @@ type StrudelMirror = {
     };
   };
 };
+
+let strudelReplLoaded: Promise<void> | null = null;
 
 type StrudelEditorElement = HTMLElement & {
   editor?: StrudelMirror;
@@ -32,6 +32,7 @@ export interface ReplAdapter {
 }
 
 export async function createReplAdapter(element: StrudelEditorElement): Promise<ReplAdapter> {
+  await loadStrudelRepl();
   const editor = await waitForEditor(element);
   let cleanCode = editor.code;
   const updateCallbacks = new Set<(code: string) => void>();
@@ -70,6 +71,14 @@ export async function createReplAdapter(element: StrudelEditorElement): Promise<
       updateCallbacks.add(callback);
     },
   };
+}
+
+async function loadStrudelRepl(): Promise<void> {
+  if (import.meta.env.VITE_STRUDEL_REPL_MOCK === '1') {
+    return;
+  }
+  strudelReplLoaded ??= import('@strudel/repl').then(() => undefined);
+  return strudelReplLoaded;
 }
 
 function waitForEditor(element: StrudelEditorElement): Promise<StrudelMirror> {

@@ -49,6 +49,11 @@ button:hover {
   background: #303840;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 #status {
   min-width: 260px;
   color: #b8c0c7;
@@ -108,8 +113,58 @@ aside p {
   margin: 0 0 12px;
 }
 
+aside h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
 code {
   color: #f1d27a;
+}
+
+.snapshot-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.snapshot-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid #2d3338;
+  padding-top: 8px;
+}
+
+.snapshot-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.snapshot-meta strong {
+  overflow: hidden;
+  color: #f4f1ea;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-meta span {
+  color: #8f9aa3;
+  font-size: 12px;
+}
+
+.snapshot-meta code {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-item button {
+  padding: 6px 8px;
 }
 
 @media (max-width: 760px) {

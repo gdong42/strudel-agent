@@ -38,3 +38,11 @@ Open:
 ```text
 http://127.0.0.1:5173/
 ```
+
+## Tests
+
+```bash
+npm test
+cd backend && UV_CACHE_DIR=../.uv-cache uv run pytest
+npm run test:e2e:mock
+```

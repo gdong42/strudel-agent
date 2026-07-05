@@ -1,6 +1,34 @@
 export interface TrackPayload {
+  projectId: string;
+  sessionId: string;
   code: string;
   updatedAt: number;
+}
+
+export interface RuntimeStatePayload {
+  projectId: string;
+  sessionId: string;
+  activeCode: string;
+  editorCode: string;
+  lastGoodCode: string;
+}
+
+export interface SnapshotRecord {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  createdAt: number;
+  label: string;
+  code: string;
+}
+
+export interface SnapshotListPayload {
+  snapshots: SnapshotRecord[];
+}
+
+export interface SnapshotRevertPayload {
+  snapshot: SnapshotRecord;
+  track: TrackPayload;
 }
 
 export function connectTrackEvents(onTrack: (payload: TrackPayload) => void, onError: () => void): EventSource {
@@ -25,6 +53,14 @@ export async function fetchTrack(): Promise<TrackPayload> {
   return response.json() as Promise<TrackPayload>;
 }
 
+export async function fetchState(): Promise<RuntimeStatePayload> {
+  const response = await fetch('/state');
+  if (!response.ok) {
+    throw new Error(`Failed to load state: ${response.status}`);
+  }
+  return response.json() as Promise<RuntimeStatePayload>;
+}
+
 export async function saveTrack(code: string): Promise<void> {
   const response = await fetch('/track', {
     method: 'POST',
@@ -36,4 +72,40 @@ export async function saveTrack(code: string): Promise<void> {
     const message = await response.text();
     throw new Error(message || `Failed to save track: ${response.status}`);
   }
+}
+
+export async function createSnapshot(code: string, label = 'Manual evaluate'): Promise<SnapshotRecord> {
+  const response = await fetch('/snapshots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, label }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Failed to create snapshot: ${response.status}`);
+  }
+
+  return response.json() as Promise<SnapshotRecord>;
+}
+
+export async function fetchSnapshots(): Promise<SnapshotListPayload> {
+  const response = await fetch('/snapshots');
+  if (!response.ok) {
+    throw new Error(`Failed to load snapshots: ${response.status}`);
+  }
+  return response.json() as Promise<SnapshotListPayload>;
+}
+
+export async function revertSnapshot(snapshotId: string): Promise<SnapshotRevertPayload> {
+  const response = await fetch(`/snapshots/${encodeURIComponent(snapshotId)}/revert`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Failed to revert snapshot: ${response.status}`);
+  }
+
+  return response.json() as Promise<SnapshotRevertPayload>;
 }
