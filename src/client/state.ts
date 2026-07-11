@@ -1,4 +1,4 @@
-import type { RuntimeStatePayload, SnapshotRecord, TrackPayload } from './bridge';
+import type { ChangeRecord, RuntimeStatePayload, SnapshotRecord, TrackPayload } from './bridge';
 
 export interface ClientRuntimeState {
   projectId: string;
@@ -7,6 +7,8 @@ export interface ClientRuntimeState {
   editorCode: string;
   lastGoodCode: string;
   lastSnapshotId: string | null;
+  preAgentCode: string | null;
+  changeSet: ChangeRecord | null;
 }
 
 export type StateListener = (state: ClientRuntimeState) => void;
@@ -19,6 +21,8 @@ export class RuntimeStateStore {
     this.state = {
       ...initial,
       lastSnapshotId: null,
+      preAgentCode: null,
+      changeSet: null,
     };
   }
 
@@ -50,6 +54,8 @@ export class RuntimeStateStore {
       editorCode: code,
       lastGoodCode: code,
       lastSnapshotId: snapshot?.id ?? this.state.lastSnapshotId,
+      preAgentCode: null,
+      changeSet: null,
     });
   }
 
@@ -67,7 +73,17 @@ export class RuntimeStateStore {
       editorCode: snapshot.code,
       lastGoodCode: snapshot.code,
       lastSnapshotId: snapshot.id,
+      preAgentCode: null,
+      changeSet: null,
     });
+  }
+
+  stageChange(change: ChangeRecord): void {
+    this.update({ editorCode: change.code, preAgentCode: change.preAgentCode, changeSet: change });
+  }
+
+  undoAgentChange(code: string): void {
+    this.update({ editorCode: code, preAgentCode: null, changeSet: null });
   }
 
   canRevert(): boolean {

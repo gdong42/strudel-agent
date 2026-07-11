@@ -160,6 +160,31 @@ test('panic calls stop and reports panic status', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__mockStopCalls)).toBe(1);
 });
 
+test('manual agent change stages diff without evaluating and can be undone', async ({ page }) => {
+  await page.goto('/');
+  const before = await page.getByTestId('mock-editor').inputValue();
+  await page.locator('#agent-intent').fill('make the drums tighter');
+  await page.locator('#agent-scope').selectOption({ label: 'drums' });
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.getByTestId('mock-editor')).toHaveValue(/Agent draft: make the drums tighter/);
+  await expect(page.locator('#agent-diff')).toContainText('+ // Agent draft');
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
+
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByTestId('mock-editor')).toHaveValue(before);
+});
+
+test('auto fire evaluates a valid staged agent change', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#auto-fire').check();
+  await page.locator('#agent-intent').fill('lift the energy');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.locator('#status')).toContainText('staged and playing');
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(1);
+});
+
 declare global {
   interface Window {
     __mockEvaluateCalls: number;

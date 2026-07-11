@@ -94,10 +94,25 @@ strudel-editor {
 
 #repl-host .cm-editor {
   height: 100%;
+  font-size: 13px;
 }
 
 #repl-host .cm-scroller {
   overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.5;
+}
+
+#repl-host .cm-content {
+  padding: 6px 0;
+}
+
+#repl-host .cm-line {
+  padding: 0 6px;
+}
+
+#repl-host .cm-gutters {
+  font-size: 12px;
 }
 
 aside {
@@ -107,7 +122,25 @@ aside {
   color: #c5cbd1;
   font-size: 14px;
   line-height: 1.5;
+  overflow-y: auto;
 }
+
+.agent-panel { margin-bottom: 22px; }
+.agent-panel form, .agent-options { display: grid; gap: 8px; }
+.agent-panel textarea, .agent-panel select { box-sizing: border-box; width: 100%; border: 1px solid #59636c; border-radius: 4px; background: #101214; color: #f4f1ea; padding: 8px; font: inherit; }
+.agent-options { grid-template-columns: 1fr 1fr; }
+.agent-options label { color: #8f9aa3; font-size: 12px; }
+.agent-options select { margin-top: 3px; }
+.auto-fire { display: flex; align-items: center; gap: 6px; }
+.agent-actions { display: flex; gap: 8px; }
+#agent-explanation { color: #b8c0c7; font-size: 12px; margin-top: 10px; }
+.agent-warning { border-left: 3px solid #f1d27a; margin: 6px 0; padding-left: 7px; font-size: 12px; }
+.warning-risk { border-color: #ff7272; color: #ff9b9b; }
+.diff-view { max-height: 210px; overflow: auto; border: 1px solid #2d3338; background: #101214; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.diff-line { min-height: 16px; padding: 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-add { background: #173525; color: #a8e6bc; }
+.diff-remove { background: #3b2022; color: #ffb3b3; }
+.diff-same { color: #77818a; }
 
 aside p {
   margin: 0 0 12px;

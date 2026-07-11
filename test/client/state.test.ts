@@ -25,7 +25,12 @@ describe('RuntimeStateStore', () => {
   it('initializes from server state', () => {
     const store = new RuntimeStateStore(initialState);
 
-    expect(store.get()).toEqual({ ...initialState, lastSnapshotId: null });
+    expect(store.get()).toEqual({
+      ...initialState,
+      lastSnapshotId: null,
+      preAgentCode: null,
+      changeSet: null,
+    });
   });
 
   it('reports revert availability when editor differs from last good code', () => {
@@ -87,4 +92,21 @@ describe('RuntimeStateStore', () => {
     expect(store.get().lastSnapshotId).toBe('snapshot-1');
     expect(store.canRevert()).toBe(false);
   });
+});
+
+it('stages and undoes an agent change without changing active code', () => {
+  const store = new RuntimeStateStore(initialState);
+  store.stageChange({
+    id: 'change-1', projectId: 'p', sessionId: 's', createdAt: 1,
+    intent: 'more groove', scope: null, intensity: null, applyMode: 'manual',
+    preAgentCode: 'old', code: 'new', explanation: 'changed groove', warnings: [], undoneAt: null,
+  });
+
+  expect(store.get().activeCode).toBe(initialState.activeCode);
+  expect(store.get().editorCode).toBe('new');
+  expect(store.get().preAgentCode).toBe('old');
+
+  store.undoAgentChange('old');
+  expect(store.get().editorCode).toBe('old');
+  expect(store.get().changeSet).toBeNull();
 });

@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .models import (
+    ChangeListResponse,
+    ChangeRequest,
+    ChangeUndoResponse,
     LOCAL_PROJECT_ID,
     LOCAL_SESSION_ID,
     RuntimeState,
@@ -19,6 +22,7 @@ from .models import (
     TrackPayload,
     TrackSaveRequest,
 )
+from .changes import create_change, latest_change, undo_change
 from .snapshots import create_snapshot, latest_snapshot, list_snapshots, read_snapshot
 from .tracks import read_track, write_track
 
@@ -103,6 +107,28 @@ async def revert_snapshot(snapshot_id: str) -> dict[str, Any]:
     return SnapshotRevertResponse(snapshot=snapshot, track=TrackPayload.model_validate(track_event())).model_dump(
         by_alias=True
     )
+
+
+@app.post("/changes")
+async def post_change(payload: ChangeRequest) -> dict[str, Any]:
+    if not payload.intent.strip():
+        raise HTTPException(status_code=400, detail="Change intent cannot be empty")
+    if not payload.current_code.strip():
+        raise HTTPException(status_code=400, detail="Current code cannot be empty")
+    return create_change(payload).model_dump(by_alias=True)
+
+
+@app.get("/changes/latest")
+async def get_latest_change() -> dict[str, Any]:
+    return ChangeListResponse(change=latest_change()).model_dump(by_alias=True)
+
+
+@app.post("/changes/{change_id}/undo")
+async def post_change_undo(change_id: str) -> dict[str, Any]:
+    change = undo_change(change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return ChangeUndoResponse(change=change, code=change.pre_agent_code).model_dump(by_alias=True)
 
 
 @app.get("/events")

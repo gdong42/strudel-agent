@@ -24,6 +24,21 @@
         <strudel-editor id="repl"></strudel-editor>
       </section>
       <aside class="side-panel" aria-label="Project status">
+        <section class="agent-panel" aria-labelledby="agent-heading">
+          <h2 id="agent-heading">Agent</h2>
+          <form id="agent-form">
+            <textarea id="agent-intent" rows="3" placeholder="Describe a musical change" required></textarea>
+            <div class="agent-options">
+              <label>Scope<select id="agent-scope"><option value="">Whole track</option><option>drums</option><option>bass</option><option>harmony</option><option>visuals</option></select></label>
+              <label>Intensity<select id="agent-intensity"><option value="">Natural</option><option>subtle</option><option>medium</option><option>strong</option></select></label>
+            </div>
+            <label class="auto-fire"><input id="auto-fire" type="checkbox"> Auto Fire</label>
+            <div class="agent-actions"><button id="stage-change" type="submit">Stage change</button><button id="undo-change" type="button" disabled>Undo</button></div>
+          </form>
+          <p id="agent-explanation">No staged agent change.</p>
+          <div id="agent-warnings" aria-live="polite"></div>
+          <div id="agent-diff" class="diff-view" aria-label="Staged code diff"></div>
+        </section>
         <h2>Track</h2>
         <p><code>tracks/main.strudel.js</code></p>
         <p>Evaluate fires the Strudel REPL, then saves a snapshot only if evaluation succeeds.</p>

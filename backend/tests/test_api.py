@@ -59,3 +59,27 @@ def test_state_uses_latest_snapshot_as_last_good(project_paths: dict[str, Path])
     assert response.status_code == 200
     assert response.json()["editorCode"] == 's("bd")\n'
     assert response.json()["lastGoodCode"] == 's("hh")'
+
+
+def test_change_stage_latest_and_undo(project_paths: dict[str, Path]) -> None:
+    client = TestClient(app)
+    staged = client.post(
+        "/changes",
+        json={"intent": "more groove", "currentCode": 's("bd")', "applyMode": "manual"},
+    )
+    assert staged.status_code == 200
+    assert staged.json()["preAgentCode"] == 's("bd")'
+    assert "more groove" in staged.json()["code"]
+
+    latest = client.get("/changes/latest")
+    assert latest.json()["change"]["id"] == staged.json()["id"]
+
+    undone = client.post(f'/changes/{staged.json()["id"]}/undo')
+    assert undone.status_code == 200
+    assert undone.json()["code"] == 's("bd")'
+
+
+def test_change_rejects_empty_intent(project_paths: dict[str, Path]) -> None:
+    client = TestClient(app)
+    response = client.post("/changes", json={"intent": " ", "currentCode": 's("bd")'})
+    assert response.status_code == 400

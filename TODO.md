@@ -28,15 +28,15 @@
 
 ## Phase 3: Agent Staging and Diff
 
-- [ ] **P3.1** Implement `POST /changes` endpoint (`backend/app/changes.py`)
-- [ ] **P3.2** Implement `GET /changes/latest` and `POST /changes/:id/undo`
-- [ ] **P3.3** Implement `src/client/agent.ts` panel (prompt input, scope/intensity controls)
-- [ ] **P3.4** Wire agent stage flow: request → response → setCode in editor → show diff → wait
-- [ ] **P3.5** Store `preAgentCode` and `changeSet` on stage; wire undo to revert
-- [ ] **P3.6** Show musical explanation and warnings in the diff panel
-- [ ] **P3.7** Implement Manual Fire / Auto Fire toggle
-- [ ] **P3.8** In Auto Fire: validate response, auto-evaluate on success, block on risk warnings
-- [ ] **P3.9** Implement `src/client/diff.ts` (full-file diff computation + inline render)
+- [x] **P3.1** Implement `POST /changes` endpoint (`backend/app/changes.py`)
+- [x] **P3.2** Implement `GET /changes/latest` and `POST /changes/:id/undo`
+- [x] **P3.3** Implement `src/client/agent.ts` panel (prompt input, scope/intensity controls)
+- [x] **P3.4** Wire agent stage flow: request → response → setCode in editor → show diff → wait
+- [x] **P3.5** Store `preAgentCode` and `changeSet` on stage; wire undo to revert
+- [x] **P3.6** Show musical explanation and warnings in the diff panel
+- [x] **P3.7** Implement Manual Fire / Auto Fire toggle
+- [x] **P3.8** In Auto Fire: validate response, auto-evaluate on success, block on risk warnings
+- [x] **P3.9** Implement `src/client/diff.ts` (full-file diff computation + inline render)
 
 ## Phase 4: Agent Integration and Prompt Contract
 

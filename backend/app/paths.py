@@ -24,3 +24,7 @@ def snapshots_dir() -> Path:
     from .config import load_config
 
     return project_root() / load_config().snapshots.directory
+
+
+def changes_dir() -> Path:
+    return project_root() / "changes"

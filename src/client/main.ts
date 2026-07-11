@@ -1,14 +1,18 @@
 import {
   connectTrackEvents,
+  createChange,
   createSnapshot,
   fetchSnapshots,
   fetchState,
   fetchTrack,
   revertSnapshot,
   saveTrack,
+  undoChange,
   type SnapshotRecord,
   type TrackPayload,
 } from './bridge';
+import { AgentPanel } from './agent';
+import { DiffView } from './diff';
 import { preflightCode } from './preflight';
 import { RecoveryView } from './recovery';
 import { createReplAdapter, type ReplAdapter } from './repl';
@@ -29,6 +33,18 @@ const stopButton = requireElement<HTMLButtonElement>('#stop');
 const panicButton = requireElement<HTMLButtonElement>('#panic');
 const statusElement = requireElement<HTMLElement>('#status');
 const snapshotListElement = requireElement<HTMLElement>('#snapshot-list');
+const agentPanel = new AgentPanel(
+  requireElement<HTMLFormElement>('#agent-form'),
+  requireElement<HTMLTextAreaElement>('#agent-intent'),
+  requireElement<HTMLSelectElement>('#agent-scope'),
+  requireElement<HTMLSelectElement>('#agent-intensity'),
+  requireElement<HTMLInputElement>('#auto-fire'),
+  requireElement<HTMLButtonElement>('#stage-change'),
+  requireElement<HTMLButtonElement>('#undo-change'),
+  requireElement<HTMLElement>('#agent-explanation'),
+  requireElement<HTMLElement>('#agent-warnings'),
+);
+const diffView = new DiffView(requireElement<HTMLElement>('#agent-diff'));
 
 function requireElement<TElement extends HTMLElement>(selector: string): TElement {
   const element = document.querySelector<TElement>(selector);
@@ -102,6 +118,54 @@ async function evaluate(): Promise<void> {
   }
 }
 
+async function stageAgentChange(value: { intent: string; scope?: string; intensity?: string; applyMode: 'manual' | 'auto' }): Promise<void> {
+  if (!repl || !state) return;
+  agentPanel.setBusy(true);
+  try {
+    const currentCode = repl.getCode();
+    const change = await createChange({ ...value, currentCode });
+    applyingRemoteCode = true;
+    repl.setCode(change.code);
+    applyingRemoteCode = false;
+    state.stageChange(change);
+    agentPanel.showChange(change);
+    diffView.render(change.preAgentCode, change.code);
+
+    const hasRisk = change.warnings.some((warning) => warning.level === 'risk');
+    const preflight = preflightCode(change.code);
+    if (value.applyMode === 'auto' && !hasRisk && preflight.errors.length === 0) {
+      await evaluate();
+      status.set('Agent change staged and playing.', 'ok');
+    } else if (value.applyMode === 'auto') {
+      status.set('Agent change staged. Auto Fire blocked by validation warnings.', 'warn');
+    } else {
+      status.set('Agent change staged. Review it, then Evaluate when ready.', 'warn');
+    }
+  } catch (error) {
+    applyingRemoteCode = false;
+    status.set(error instanceof Error ? error.message : String(error), 'error');
+  } finally {
+    agentPanel.setBusy(false);
+  }
+}
+
+async function undoAgentStage(): Promise<void> {
+  if (!repl || !state?.get().changeSet) return;
+  try {
+    const result = await undoChange(state.get().changeSet!.id);
+    applyingRemoteCode = true;
+    repl.setCode(result.code);
+    applyingRemoteCode = false;
+    state.undoAgentChange(result.code);
+    agentPanel.clearChange();
+    diffView.clear();
+    status.set('Agent change undone. Running music was not changed.', 'ok');
+  } catch (error) {
+    applyingRemoteCode = false;
+    status.set(error instanceof Error ? error.message : String(error), 'error');
+  }
+}
+
 async function revertToLastGood(): Promise<void> {
   if (!repl || !state || !state.canRevert()) {
     return;
@@ -163,6 +227,7 @@ function renderSnapshots(): void {
 
 async function stop(): Promise<void> {
   await repl?.stop();
+  agentPanel.disableAutoFire();
   status.set('Stopped', 'warn');
 }
 
@@ -224,6 +289,9 @@ stopButton.addEventListener('click', () => {
 panicButton.addEventListener('click', () => {
   panic();
 });
+
+agentPanel.onSubmit((value) => { stageAgentChange(value); });
+agentPanel.onUndo(() => { undoAgentStage(); });
 
 boot().catch((error) => {
   status.set(error instanceof Error ? error.message : String(error), 'error');

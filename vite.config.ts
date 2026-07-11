@@ -1,14 +1,19 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig({
-  server: {
-    host: '127.0.0.1',
-    port: 5173,
-    proxy: {
-      '/events': 'http://127.0.0.1:8787',
-      '/snapshots': 'http://127.0.0.1:8787',
-      '/state': 'http://127.0.0.1:8787',
-      '/track': 'http://127.0.0.1:8787',
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, '.', 'VITE_');
+  const backend = env.VITE_BACKEND_URL || 'http://127.0.0.1:8787';
+  return {
+    server: {
+      host: '127.0.0.1',
+      port: 5173,
+      proxy: {
+        '/changes': backend,
+        '/events': backend,
+        '/snapshots': backend,
+        '/state': backend,
+        '/track': backend,
+      },
     },
-  },
+  };
 });

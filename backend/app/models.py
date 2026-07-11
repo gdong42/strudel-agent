@@ -61,3 +61,51 @@ class ChangeWarning(BaseModel):
     level: Literal["info", "warn", "risk"]
     message: str
     category: Literal["sample", "visual", "structure", "performance", "mini-notation"]
+
+
+class ChangedRange(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_: int = Field(alias="from")
+    to: int
+    description: str
+
+
+class ChangeRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    intent: str
+    current_code: str = Field(alias="currentCode")
+    apply_mode: Literal["manual", "auto"] = Field(default="manual", alias="applyMode")
+    scope: str | None = None
+    intensity: str | None = None
+    timing: str | None = None
+    avoid: str | None = None
+
+
+class ChangeRecord(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    project_id: str = Field(alias="projectId")
+    session_id: str = Field(alias="sessionId")
+    created_at: int = Field(alias="createdAt")
+    intent: str
+    scope: str | None = None
+    intensity: str | None = None
+    apply_mode: Literal["manual", "auto"] = Field(alias="applyMode")
+    pre_agent_code: str = Field(alias="preAgentCode")
+    code: str
+    explanation: str
+    warnings: list[ChangeWarning] = Field(default_factory=list)
+    ranges: list[ChangedRange] | None = None
+    undone_at: int | None = Field(default=None, alias="undoneAt")
+
+
+class ChangeListResponse(BaseModel):
+    change: ChangeRecord | None
+
+
+class ChangeUndoResponse(BaseModel):
+    change: ChangeRecord
+    code: str
