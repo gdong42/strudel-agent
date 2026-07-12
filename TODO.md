@@ -30,7 +30,7 @@
 
 - [x] **P3.1** Implement `POST /changes` endpoint (`backend/app/changes.py`)
 - [x] **P3.2** Implement `GET /changes/latest` and `POST /changes/:id/undo`
-- [x] **P3.3** Implement `src/client/agent.ts` panel (prompt input, scope/intensity controls)
+- [x] **P3.3** Implement `src/client/agent.ts` panel (prompt input and apply controls)
 - [x] **P3.4** Wire agent stage flow: request → response → setCode in editor → show diff → wait
 - [x] **P3.5** Store `preAgentCode` and `changeSet` on stage; wire undo to revert
 - [x] **P3.6** Show musical explanation and warnings in the diff panel
@@ -48,18 +48,34 @@
 - [x] **P4A.4** Route `POST /changes` through agent service before persistence
 - [x] **P4A.5** Test provider mapping, invalid responses, selection, and API failure behavior
 
-### Phase 4B: First Real Provider
+### Phase 4B.1: Provider Settings
 
-- [ ] **P4B.1** Select the first provider and default model
-- [ ] **P4B.2** Implement its direct API adapter with structured output
-- [ ] **P4B.3** Load API credentials from environment variables only
-- [ ] **P4B.4** Add timeout, cancellation, and user-facing provider errors
-- [ ] **P4B.5** Add loading and duplicate-submit protection to the agent panel
+- [x] **P4B1.1** Add a settings dialog for provider, model, and API key
+- [x] **P4B1.2** Use backend config as defaults and browser settings as overrides
+- [x] **P4B1.3** Store API keys in session or persistent browser storage by user choice
+- [x] **P4B1.4** Pass credentials to the backend per request without server persistence
+- [x] **P4B1.5** Add provider discovery, connection test, and settings tests
+- [x] **P4B1.6** Remove premature scope, intensity, timing, and avoid product fields
+
+### Phase 4B.2: First Real Provider
+
+- [ ] **P4B2.1** Select the first provider and default model
+- [ ] **P4B2.2** Implement its direct API adapter with structured output
+- [ ] **P4B2.3** Add timeout, cancellation, and user-facing provider errors
+- [ ] **P4B2.4** Add loading, cancellation, and duplicate-submit behavior to the agent panel
+- [ ] **P4B2.5** Record provider, model, and latency without persisting credentials
+
+### Phase 4B.3: Concurrent Editing
+
+- [ ] **P4B3.1** Capture request base code and hash
+- [ ] **P4B3.2** Detect editor changes while a provider request is running
+- [ ] **P4B3.3** Keep stale responses outside the editor as candidates
+- [ ] **P4B3.4** Add Regenerate, Use agent code, and Dismiss actions
 
 ### Phase 4C: Prompt Contract
 
 - [ ] **P4C.1** Define the system prompt and structured response schema
-- [ ] **P4C.2** Express scope, intensity, timing, and avoid as prompt constraints
+- [ ] **P4C.2** Interpret constraints from the user's freeform musical intent
 - [ ] **P4C.3** Add post-generation checks for obvious scope violations
 - [ ] **P4C.4** Add a minimal fixed prompt test set
 

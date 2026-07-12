@@ -28,8 +28,6 @@ async def test_agent_maps_change_request_to_provider_contract() -> None:
             intent="  add energy  ",
             currentCode='s("bd")',
             applyMode="auto",
-            scope="drums",
-            timing="next section",
         )
     )
 
@@ -37,8 +35,6 @@ async def test_agent_maps_change_request_to_provider_contract() -> None:
     assert provider.request == ProviderRequest(
         intent="add energy",
         current_code='s("bd")',
-        scope="drums",
-        timing="next section",
     )
 
 
@@ -52,13 +48,13 @@ async def test_agent_rejects_empty_provider_code() -> None:
 
 @pytest.mark.anyio
 async def test_mock_provider_is_deterministic() -> None:
-    request = ProviderRequest(intent="add energy", current_code='s("bd")', scope="drums", intensity="medium")
+    request = ProviderRequest(intent="add energy", current_code='s("bd")')
 
     first = await MockProvider().create_change(request)
     second = await MockProvider().create_change(request)
 
     assert first == second
-    assert "Agent draft: add energy (drums, medium)" in first.code
+    assert "Agent draft: add energy" in first.code
 
 
 def test_unknown_provider_is_a_configuration_error() -> None:

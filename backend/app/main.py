@@ -5,16 +5,18 @@ import json
 import time
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .agent import AgentConfigurationError, AgentResponseError, create_agent_service
+from .agent import AgentConfigurationError, AgentResponseError, create_agent_service, list_provider_info
 from .changes import create_change, latest_change, undo_change
+from .config import load_config
 from .models import (
     ChangeListResponse,
     ChangeRequest,
     ChangeUndoResponse,
+    AgentSettingsResponse,
     LOCAL_PROJECT_ID,
     LOCAL_SESSION_ID,
     RuntimeState,
@@ -23,6 +25,8 @@ from .models import (
     SnapshotRevertResponse,
     TrackPayload,
     TrackSaveRequest,
+    ProviderTestRequest,
+    ProviderTestResponse,
 )
 from .providers.base import ProviderError
 from .snapshots import create_snapshot, latest_snapshot, list_snapshots, read_snapshot
@@ -111,14 +115,45 @@ async def revert_snapshot(snapshot_id: str) -> dict[str, Any]:
     )
 
 
+@app.get("/agent/settings")
+async def get_agent_settings() -> dict[str, Any]:
+    config = load_config().agent
+    return AgentSettingsResponse(
+        defaultProvider=config.provider,
+        defaultModel=config.model,
+        providers=list_provider_info(),
+    ).model_dump(by_alias=True)
+
+
+@app.post("/agent/providers/test")
+async def test_agent_provider(payload: ProviderTestRequest) -> dict[str, Any]:
+    try:
+        service = create_agent_service(payload.provider, model=payload.model, api_key=payload.api_key)
+        await service.test_connection()
+    except AgentConfigurationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return ProviderTestResponse(ok=True, message="Provider connection is ready").model_dump(by_alias=True)
+
+
 @app.post("/changes")
-async def post_change(payload: ChangeRequest) -> dict[str, Any]:
+async def post_change(
+    payload: ChangeRequest,
+    x_agent_provider: str | None = Header(default=None),
+    x_agent_model: str | None = Header(default=None),
+    x_agent_api_key: str | None = Header(default=None),
+) -> dict[str, Any]:
     if not payload.intent.strip():
         raise HTTPException(status_code=400, detail="Change intent cannot be empty")
     if not payload.current_code.strip():
         raise HTTPException(status_code=400, detail="Current code cannot be empty")
     try:
-        generated = await create_agent_service().create_change(payload)
+        generated = await create_agent_service(
+            x_agent_provider,
+            model=x_agent_model,
+            api_key=x_agent_api_key,
+        ).create_change(payload)
     except AgentConfigurationError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
     except (AgentResponseError, ProviderError) as error:

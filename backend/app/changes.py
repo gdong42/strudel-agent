@@ -20,8 +20,6 @@ def create_change(request: ChangeRequest, generated: GeneratedChange) -> ChangeR
         sessionId=LOCAL_SESSION_ID,
         createdAt=now,
         intent=request.intent.strip(),
-        scope=request.scope,
-        intensity=request.intensity,
         applyMode=request.apply_mode,
         preAgentCode=request.current_code,
         code=generated.code,

@@ -98,7 +98,7 @@ it('stages and undoes an agent change without changing active code', () => {
   const store = new RuntimeStateStore(initialState);
   store.stageChange({
     id: 'change-1', projectId: 'p', sessionId: 's', createdAt: 1,
-    intent: 'more groove', scope: null, intensity: null, applyMode: 'manual',
+    intent: 'more groove', applyMode: 'manual',
     preAgentCode: 'old', code: 'new', explanation: 'changed groove', warnings: [], undoneAt: null,
   });
 

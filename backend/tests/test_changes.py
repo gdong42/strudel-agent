@@ -5,7 +5,7 @@ from app.models import ChangeRequest, GeneratedChange
 
 
 def test_create_latest_and_undo_change(project_paths: dict[str, Path]) -> None:
-    request = ChangeRequest(intent="add energy", currentCode='s("bd")', scope="drums", intensity="medium")
+    request = ChangeRequest(intent="add energy", currentCode='s("bd")')
     generated = GeneratedChange(code='s("bd*4")', explanation="Added four-on-the-floor drums.")
     change = create_change(request, generated)
 

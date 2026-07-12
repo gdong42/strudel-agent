@@ -45,8 +45,6 @@ export interface ChangeRecord {
   sessionId: string;
   createdAt: number;
   intent: string;
-  scope: string | null;
-  intensity: string | null;
   applyMode: ApplyMode;
   preAgentCode: string;
   code: string;
@@ -59,8 +57,24 @@ export interface ChangeRequestPayload {
   intent: string;
   currentCode: string;
   applyMode: ApplyMode;
-  scope?: string;
-  intensity?: string;
+}
+
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  requiresApiKey: boolean;
+}
+
+export interface AgentSettingsPayload {
+  defaultProvider: string;
+  defaultModel: string | null;
+  providers: ProviderInfo[];
+}
+
+export interface AgentConnection {
+  provider: string | null;
+  model: string | null;
+  apiKey: string | null;
 }
 
 export function connectTrackEvents(onTrack: (payload: TrackPayload) => void, onError: () => void): EventSource {
@@ -142,16 +156,36 @@ export async function revertSnapshot(snapshotId: string): Promise<SnapshotRevert
   return response.json() as Promise<SnapshotRevertPayload>;
 }
 
-export async function createChange(payload: ChangeRequestPayload): Promise<ChangeRecord> {
+export async function createChange(payload: ChangeRequestPayload, connection?: AgentConnection): Promise<ChangeRecord> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (connection?.provider) headers['X-Agent-Provider'] = connection.provider;
+  if (connection?.model) headers['X-Agent-Model'] = connection.model;
+  if (connection?.apiKey) headers['X-Agent-Api-Key'] = connection.apiKey;
   const response = await fetch('/changes', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
     throw new Error((await response.text()) || `Failed to stage change: ${response.status}`);
   }
   return response.json() as Promise<ChangeRecord>;
+}
+
+export async function fetchAgentSettings(): Promise<AgentSettingsPayload> {
+  const response = await fetch('/agent/settings');
+  if (!response.ok) throw new Error(`Failed to load agent settings: ${response.status}`);
+  return response.json() as Promise<AgentSettingsPayload>;
+}
+
+export async function testAgentProvider(connection: AgentConnection): Promise<{ ok: boolean; message: string }> {
+  const response = await fetch('/agent/providers/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(connection),
+  });
+  if (!response.ok) throw new Error((await response.text()) || `Provider test failed: ${response.status}`);
+  return response.json() as Promise<{ ok: boolean; message: string }>;
 }
 
 export async function undoChange(changeId: string): Promise<{ change: ChangeRecord; code: string }> {

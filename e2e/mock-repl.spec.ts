@@ -162,9 +162,9 @@ test('panic calls stop and reports panic status', async ({ page }) => {
 
 test('manual agent change stages diff without evaluating and can be undone', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
   const before = await page.getByTestId('mock-editor').inputValue();
   await page.locator('#agent-intent').fill('make the drums tighter');
-  await page.locator('#agent-scope').selectOption({ label: 'drums' });
   await page.getByRole('button', { name: 'Stage change' }).click();
 
   await expect(page.getByTestId('mock-editor')).toHaveValue(/Agent draft: make the drums tighter/);
@@ -183,6 +183,23 @@ test('auto fire evaluates a valid staged agent change', async ({ page }) => {
 
   await expect(page.locator('#status')).toContainText('staged and playing');
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(1);
+});
+
+test('agent settings use backend defaults and persist browser overrides', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#agent-provider-summary')).toHaveText('mock');
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.locator('#settings-dialog')).toBeVisible();
+  await expect(page.locator('#settings-provider')).toContainText('Backend default (mock)');
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.locator('#settings-message')).toContainText('ready');
+
+  await page.locator('#settings-model').fill('local-test-model');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('#settings-dialog')).not.toBeVisible();
+  await expect(page.locator('#agent-provider-summary')).toHaveText('mock / local-test-model');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v1'))).toContain('local-test-model');
 });
 
 declare global {

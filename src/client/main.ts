@@ -17,6 +17,7 @@ import { preflightCode } from './preflight';
 import { RecoveryView } from './recovery';
 import { createReplAdapter, type ReplAdapter } from './repl';
 import { SnapshotListView } from './snapshots';
+import { SettingsPanel } from './settings';
 import { RuntimeStateStore } from './state';
 import { StatusView } from './status';
 import './styles.css';
@@ -36,13 +37,25 @@ const snapshotListElement = requireElement<HTMLElement>('#snapshot-list');
 const agentPanel = new AgentPanel(
   requireElement<HTMLFormElement>('#agent-form'),
   requireElement<HTMLTextAreaElement>('#agent-intent'),
-  requireElement<HTMLSelectElement>('#agent-scope'),
-  requireElement<HTMLSelectElement>('#agent-intensity'),
   requireElement<HTMLInputElement>('#auto-fire'),
   requireElement<HTMLButtonElement>('#stage-change'),
   requireElement<HTMLButtonElement>('#undo-change'),
   requireElement<HTMLElement>('#agent-explanation'),
   requireElement<HTMLElement>('#agent-warnings'),
+);
+const settingsPanel = new SettingsPanel(
+  requireElement<HTMLDialogElement>('#settings-dialog'),
+  requireElement<HTMLButtonElement>('#open-settings'),
+  requireElement<HTMLButtonElement>('#close-settings'),
+  requireElement<HTMLFormElement>('#settings-form'),
+  requireElement<HTMLSelectElement>('#settings-provider'),
+  requireElement<HTMLInputElement>('#settings-model'),
+  requireElement<HTMLInputElement>('#settings-api-key'),
+  requireElement<HTMLInputElement>('#settings-remember-key'),
+  requireElement<HTMLButtonElement>('#test-provider'),
+  requireElement<HTMLButtonElement>('#clear-api-key'),
+  requireElement<HTMLElement>('#settings-message'),
+  requireElement<HTMLElement>('#agent-provider-summary'),
 );
 const diffView = new DiffView(requireElement<HTMLElement>('#agent-diff'));
 
@@ -118,12 +131,12 @@ async function evaluate(): Promise<void> {
   }
 }
 
-async function stageAgentChange(value: { intent: string; scope?: string; intensity?: string; applyMode: 'manual' | 'auto' }): Promise<void> {
+async function stageAgentChange(value: { intent: string; applyMode: 'manual' | 'auto' }): Promise<void> {
   if (!repl || !state) return;
   agentPanel.setBusy(true);
   try {
     const currentCode = repl.getCode();
-    const change = await createChange({ ...value, currentCode });
+    const change = await createChange({ ...value, currentCode }, settingsPanel.getConnection());
     applyingRemoteCode = true;
     repl.setCode(change.code);
     applyingRemoteCode = false;
@@ -239,7 +252,14 @@ async function panic(): Promise<void> {
 async function boot(): Promise<void> {
   status.set('Waiting for REPL...', 'warn');
 
-  const [serverState, snapshots] = await Promise.all([fetchState(), fetchSnapshots()]);
+  const settingsReady = settingsPanel.initialize().catch(() => {
+    status.set('Agent settings unavailable. REPL controls remain available.', 'warn');
+  });
+  const [serverState, snapshots] = await Promise.all([
+    fetchState(),
+    fetchSnapshots(),
+    settingsReady,
+  ]);
   state = new RuntimeStateStore(serverState);
   snapshotsCache = snapshots.snapshots;
   renderSnapshots();

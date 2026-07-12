@@ -2,8 +2,6 @@ import type { ApplyMode, ChangeRecord, ChangeWarning } from './bridge';
 
 export interface AgentFormValue {
   intent: string;
-  scope?: string;
-  intensity?: string;
   applyMode: ApplyMode;
 }
 
@@ -14,8 +12,6 @@ export class AgentPanel {
   constructor(
     form: HTMLFormElement,
     private readonly intent: HTMLTextAreaElement,
-    private readonly scope: HTMLSelectElement,
-    private readonly intensity: HTMLSelectElement,
     private readonly autoFire: HTMLInputElement,
     private readonly submit: HTMLButtonElement,
     private readonly undo: HTMLButtonElement,
@@ -28,8 +24,6 @@ export class AgentPanel {
       if (!intent || !this.submitHandler) return;
       this.submitHandler({
         intent,
-        scope: this.scope.value || undefined,
-        intensity: this.intensity.value || undefined,
         applyMode: this.autoFire.checked ? 'auto' : 'manual',
       });
     });

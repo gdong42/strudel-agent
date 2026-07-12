@@ -57,12 +57,16 @@ For the first formal version, the editor remains visible because it is the most 
 
 The user can interact with the agent through musical intent rather than code. The agent can propose and revise changes to rhythm, harmony, arrangement, samples, effects, and visuals.
 
-Agent requests may include constraints:
+Users can express constraints directly in natural language:
 
 - scope: "only change drums", "do not touch bass", "visuals only"
 - intensity: "subtle", "more energetic", "make it peak"
 - timing: "prepare a break", "make a drop for the next section"
 - protection: "keep the current groove", "do not add low-end"
+
+The early product does not expose these as separate scope, intensity, timing, or
+protection fields. They remain part of the freeform request until usage shows that
+a stable structured control would improve the interaction.
 
 The agent should explain proposed changes in musical terms, not only code terms. For example, it should say that it tightened the bass rhythm, brightened the hats, or moved a pad out of the low-frequency range.
 
@@ -305,12 +309,7 @@ The current single-file POC can stay as a reference, but formal development shou
 
 ### Phase 4: Agent Integration and Prompt Contract
 
-- Define a structured instruction format:
-  - musical intent
-  - scope
-  - constraints
-  - intensity
-  - avoid list
+- Define a freeform musical intent contract and structured agent response.
 - Let the agent generate staged changes against the current editor contents.
 - Store prompts and staged changes in `changes/`.
 - Add agent context from `agent-context.md`.

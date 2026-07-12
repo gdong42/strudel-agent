@@ -156,10 +156,6 @@ the application after generation.
 class ProviderRequest:
     intent: str
     current_code: str
-    scope: str | None = None
-    intensity: str | None = None
-    timing: str | None = None
-    avoid: str | None = None
 
 class AgentProvider(Protocol):
     async def create_change(self, request: ProviderRequest) -> GeneratedChange:
@@ -183,12 +179,6 @@ Initial provider examples:
 class ChangeRequest(BaseModel):
     # User's natural language intent
     intent: str
-
-    # Optional constraints
-    scope: str | None = None       # e.g. "drums only", "bass and chords"
-    intensity: str | None = None   # e.g. "subtle", "energetic"
-    timing: str | None = None      # e.g. "prepare a break", "next section"
-    avoid: str | None = None       # e.g. "do not touch bass"
 
     # Current context
     current_code: str              # editorCode at time of request
@@ -258,6 +248,7 @@ If validation fails with warnings at `risk` level, the change is staged but NOT 
 | `client/state.ts` | Client-side state machine (§4), transition guards |
 | `client/recovery.ts` | Revert to `lastGoodCode`, error display, panic handler |
 | `client/status.ts` | Status bar: connection status, last evaluate time, warnings |
+| `client/settings.ts` | Browser-local provider/model settings and API-key storage policy |
 | `client/bridge.ts` | SSE listener, HTTP helpers, reconnect logic |
 | `client/main.ts` | App bootstrap, glue |
 
@@ -267,6 +258,8 @@ If validation fails with warnings at `risk` level, the change is staged but NOT 
 GET  /events                     SSE stream (track updates, agent notifications)
 POST /track                      Save editor code to disk (from evaluate)
 GET  /state                      Current local project/session runtime state
+GET  /agent/settings             Provider defaults and installed provider capabilities
+POST /agent/providers/test       Test transient browser-supplied provider settings
 POST /changes                    Stage an agent change
 GET  /changes/latest             Get latest staged change metadata
 POST /changes/:id/undo           Undo a staged change (restore preAgentCode)
@@ -308,6 +301,7 @@ GET  /samples                    List known samples
 │       ├── state.ts
 │       ├── recovery.ts
 │       ├── status.ts
+│       ├── settings.ts
 │       └── bridge.ts
 ├── tracks/
 │   └── main.strudel.js
@@ -350,6 +344,12 @@ GET  /samples                    List known samples
   }
 }
 ```
+
+The config file supplies backend defaults. The settings UI can override provider
+and model in the current browser. API keys are stored only in browser storage and
+sent to the backend for the duration of an individual request; the backend must
+not persist or return them. A hosted deployment may use platform credentials when
+the browser does not supply a user key.
 
 ## 10. agent-context.md Format
 

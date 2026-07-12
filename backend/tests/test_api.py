@@ -96,7 +96,10 @@ def test_change_rejects_empty_intent(project_paths: dict[str, Path]) -> None:
 def test_change_rejects_invalid_provider_response_without_persisting(
     project_paths: dict[str, Path], monkeypatch
 ) -> None:
-    monkeypatch.setattr("app.main.create_agent_service", lambda: AgentService(EmptyCodeProvider()))
+    monkeypatch.setattr(
+        "app.main.create_agent_service",
+        lambda *args, **kwargs: AgentService(EmptyCodeProvider()),
+    )
     client = TestClient(app)
 
     response = client.post("/changes", json={"intent": "change it", "currentCode": 's("bd")'})
@@ -104,3 +107,25 @@ def test_change_rejects_invalid_provider_response_without_persisting(
     assert response.status_code == 502
     assert "empty Strudel code" in response.json()["detail"]
     assert list(project_paths["changes_dir"].glob("*.json")) == []
+
+
+def test_agent_settings_exposes_defaults_without_secrets(project_paths: dict[str, Path]) -> None:
+    client = TestClient(app)
+
+    response = client.get("/agent/settings")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "defaultProvider": "mock",
+        "defaultModel": None,
+        "providers": [{"id": "mock", "label": "Mock", "requiresApiKey": False}],
+    }
+
+
+def test_mock_provider_connection(project_paths: dict[str, Path]) -> None:
+    client = TestClient(app)
+
+    response = client.post("/agent/providers/test", json={"provider": "mock"})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True

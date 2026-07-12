@@ -77,10 +77,6 @@ class ChangeRequest(BaseModel):
     intent: str
     current_code: str = Field(alias="currentCode")
     apply_mode: Literal["manual", "auto"] = Field(default="manual", alias="applyMode")
-    scope: str | None = None
-    intensity: str | None = None
-    timing: str | None = None
-    avoid: str | None = None
 
 
 class GeneratedChange(BaseModel):
@@ -98,8 +94,6 @@ class ChangeRecord(BaseModel):
     session_id: str = Field(alias="sessionId")
     created_at: int = Field(alias="createdAt")
     intent: str
-    scope: str | None = None
-    intensity: str | None = None
     apply_mode: Literal["manual", "auto"] = Field(alias="applyMode")
     pre_agent_code: str = Field(alias="preAgentCode")
     code: str
@@ -116,3 +110,32 @@ class ChangeListResponse(BaseModel):
 class ChangeUndoResponse(BaseModel):
     change: ChangeRecord
     code: str
+
+
+class ProviderInfo(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    label: str
+    requires_api_key: bool = Field(alias="requiresApiKey")
+
+
+class AgentSettingsResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    default_provider: str = Field(alias="defaultProvider")
+    default_model: str | None = Field(alias="defaultModel")
+    providers: list[ProviderInfo]
+
+
+class ProviderTestRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    provider: str | None = None
+    model: str | None = None
+    api_key: str | None = Field(default=None, alias="apiKey")
+
+
+class ProviderTestResponse(BaseModel):
+    ok: bool
+    message: str

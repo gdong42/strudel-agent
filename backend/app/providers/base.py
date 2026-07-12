@@ -10,15 +10,14 @@ from ..models import GeneratedChange
 class ProviderRequest:
     intent: str
     current_code: str
-    scope: str | None = None
-    intensity: str | None = None
-    timing: str | None = None
-    avoid: str | None = None
 
 
 class AgentProvider(Protocol):
     async def create_change(self, request: ProviderRequest) -> GeneratedChange:
         """Generate a complete replacement for the current Strudel code."""
+
+    async def test_connection(self) -> None:
+        """Raise ProviderError when the provider is not ready for requests."""
 
 
 class ProviderError(RuntimeError):

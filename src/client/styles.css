@@ -126,11 +126,8 @@ aside {
 }
 
 .agent-panel { margin-bottom: 22px; }
-.agent-panel form, .agent-options { display: grid; gap: 8px; }
-.agent-panel textarea, .agent-panel select { box-sizing: border-box; width: 100%; border: 1px solid #59636c; border-radius: 4px; background: #101214; color: #f4f1ea; padding: 8px; font: inherit; }
-.agent-options { grid-template-columns: 1fr 1fr; }
-.agent-options label { color: #8f9aa3; font-size: 12px; }
-.agent-options select { margin-top: 3px; }
+.agent-panel form { display: grid; gap: 8px; }
+.agent-panel textarea { box-sizing: border-box; width: 100%; border: 1px solid #59636c; border-radius: 4px; background: #101214; color: #f4f1ea; padding: 8px; font: inherit; }
 .auto-fire { display: flex; align-items: center; gap: 6px; }
 .agent-actions { display: flex; gap: 8px; }
 #agent-explanation { color: #b8c0c7; font-size: 12px; margin-top: 10px; }
@@ -141,6 +138,20 @@ aside {
 .diff-add { background: #173525; color: #a8e6bc; }
 .diff-remove { background: #3b2022; color: #ffb3b3; }
 .diff-same { color: #77818a; }
+.provider-summary { color: #8f9aa3; font-size: 12px; }
+
+dialog { width: min(440px, calc(100vw - 32px)); border: 1px solid #59636c; border-radius: 6px; background: #171a1d; color: #f4f1ea; padding: 0; }
+dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.settings-form { display: grid; gap: 14px; padding: 18px; }
+.dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dialog-heading h2 { margin: 0; font-size: 15px; }
+.settings-form > label { display: grid; gap: 5px; color: #b8c0c7; font-size: 13px; }
+.settings-form input, .settings-form select { box-sizing: border-box; width: 100%; border: 1px solid #59636c; border-radius: 4px; background: #101214; color: #f4f1ea; padding: 8px; font: inherit; }
+.settings-form .remember-key { display: flex; align-items: center; grid-template-columns: auto 1fr; }
+.settings-form .remember-key input { width: auto; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-actions button[type="submit"] { margin-left: auto; }
+.settings-message { min-height: 20px; margin: 0; color: #b8c0c7; font-size: 12px; }
 
 aside p {
   margin: 0 0 12px;
