@@ -147,13 +147,28 @@ Rationale:
 - Hosted or SDK-specific agent loops can be evaluated inside individual adapters later, but their concepts should not leak into the product state model.
 - Direct API calls keep the first implementation easier to reason about and deploy.
 
-Provider adapters should expose the same internal operation:
+Provider adapters expose one asynchronous operation. Execution policy such as
+`apply_mode` stays outside this contract because Manual/Auto Fire is controlled by
+the application after generation.
 
 ```python
+@dataclass(frozen=True)
+class ProviderRequest:
+    intent: str
+    current_code: str
+    scope: str | None = None
+    intensity: str | None = None
+    timing: str | None = None
+    avoid: str | None = None
+
 class AgentProvider(Protocol):
-    async def create_change(self, request: ChangeRequest) -> ChangeResponse:
+    async def create_change(self, request: ProviderRequest) -> GeneratedChange:
         ...
 ```
+
+`AgentService` selects the configured provider, maps `ChangeRequest` into this
+contract, and validates that the provider returned non-empty code and explanation.
+`changes.py` persists only validated generated changes.
 
 Initial provider examples:
 

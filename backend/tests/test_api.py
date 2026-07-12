@@ -4,7 +4,15 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.agent import AgentService
 from app.main import app
+from app.models import GeneratedChange
+from app.providers.base import ProviderRequest
+
+
+class EmptyCodeProvider:
+    async def create_change(self, request: ProviderRequest) -> GeneratedChange:
+        return GeneratedChange(code=" ", explanation="Invalid response")
 
 
 def test_get_track(project_paths: dict[str, Path]) -> None:
@@ -83,3 +91,16 @@ def test_change_rejects_empty_intent(project_paths: dict[str, Path]) -> None:
     client = TestClient(app)
     response = client.post("/changes", json={"intent": " ", "currentCode": 's("bd")'})
     assert response.status_code == 400
+
+
+def test_change_rejects_invalid_provider_response_without_persisting(
+    project_paths: dict[str, Path], monkeypatch
+) -> None:
+    monkeypatch.setattr("app.main.create_agent_service", lambda: AgentService(EmptyCodeProvider()))
+    client = TestClient(app)
+
+    response = client.post("/changes", json={"intent": "change it", "currentCode": 's("bd")'})
+
+    assert response.status_code == 502
+    assert "empty Strudel code" in response.json()["detail"]
+    assert list(project_paths["changes_dir"].glob("*.json")) == []

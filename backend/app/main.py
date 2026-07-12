@@ -9,6 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from .agent import AgentConfigurationError, AgentResponseError, create_agent_service
+from .changes import create_change, latest_change, undo_change
 from .models import (
     ChangeListResponse,
     ChangeRequest,
@@ -22,7 +24,7 @@ from .models import (
     TrackPayload,
     TrackSaveRequest,
 )
-from .changes import create_change, latest_change, undo_change
+from .providers.base import ProviderError
 from .snapshots import create_snapshot, latest_snapshot, list_snapshots, read_snapshot
 from .tracks import read_track, write_track
 
@@ -115,7 +117,13 @@ async def post_change(payload: ChangeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Change intent cannot be empty")
     if not payload.current_code.strip():
         raise HTTPException(status_code=400, detail="Current code cannot be empty")
-    return create_change(payload).model_dump(by_alias=True)
+    try:
+        generated = await create_agent_service().create_change(payload)
+    except AgentConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    except (AgentResponseError, ProviderError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return create_change(payload, generated).model_dump(by_alias=True)
 
 
 @app.get("/changes/latest")

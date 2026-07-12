@@ -5,16 +5,15 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from .models import ChangeRecord, ChangeRequest, LOCAL_PROJECT_ID, LOCAL_SESSION_ID
+from .models import ChangeRecord, ChangeRequest, GeneratedChange, LOCAL_PROJECT_ID, LOCAL_SESSION_ID
 from .paths import changes_dir
 
 
 CHANGES_DIR = changes_dir()
 
 
-def create_change(request: ChangeRequest) -> ChangeRecord:
+def create_change(request: ChangeRequest, generated: GeneratedChange) -> ChangeRecord:
     now = int(time.time() * 1000)
-    code = _mock_change(request)
     record = ChangeRecord(
         id=f"{now}-{uuid4().hex[:8]}",
         projectId=LOCAL_PROJECT_ID,
@@ -25,10 +24,10 @@ def create_change(request: ChangeRequest) -> ChangeRecord:
         intensity=request.intensity,
         applyMode=request.apply_mode,
         preAgentCode=request.current_code,
-        code=code,
-        explanation=_explanation(request),
-        warnings=[],
-        ranges=None,
+        code=generated.code,
+        explanation=generated.explanation,
+        warnings=generated.warnings,
+        ranges=generated.ranges,
     )
     _write_change(record)
     return record
@@ -58,21 +57,6 @@ def undo_change(change_id: str) -> ChangeRecord | None:
     record.undone_at = int(time.time() * 1000)
     _write_change(record)
     return record
-
-
-def _mock_change(request: ChangeRequest) -> str:
-    code = request.current_code.rstrip()
-    marker = f"// Agent draft: {request.intent.strip()}"
-    details = [value for value in (request.scope, request.intensity) if value]
-    if details:
-        marker += f" ({', '.join(details)})"
-    return f"{code}\n\n{marker}\n"
-
-
-def _explanation(request: ChangeRequest) -> str:
-    detail = ", ".join(value for value in (request.scope, request.intensity) if value)
-    suffix = f" with {detail}" if detail else ""
-    return f'Prepared a local mock change for "{request.intent.strip()}"{suffix}.'
 
 
 def _write_change(record: ChangeRecord) -> None:

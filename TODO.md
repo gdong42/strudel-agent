@@ -40,17 +40,46 @@
 
 ## Phase 4: Agent Integration and Prompt Contract
 
-- [ ] **P4.1** Implement `backend/app/agent.py` prompt construction and provider selection
-- [ ] **P4.2** Implement provider adapter interface in `backend/app/providers/base.py`
-- [ ] **P4.3** Add mock provider for deterministic UI/backend development
-- [ ] **P4.4** Add first direct API provider adapter (OpenAI or Anthropic)
-- [ ] **P4.5** Wire `agent-context.md` into the system prompt on each request
-- [ ] **P4.6** Add project convention fields (mood, stems, arrangement markers) to config
-- [ ] **P4.7** Store agent prompts and responses in `changes/` directory
-- [ ] **P4.8** Add scope constraint parsing ("only drums", "don't touch bass")
-- [ ] **P4.9** Add intensity constraint parsing ("subtle", "energetic", "10% more")
-- [ ] **P4.10** Add timing constraint parsing ("prepare a break", "make a drop")
-- [ ] **P4.11** Tune prompt format based on real usage quality
+### Phase 4A: Provider Contract
+
+- [x] **P4A.1** Define the async provider request/response contract and provider error type
+- [x] **P4A.2** Add agent service provider selection and response validation
+- [x] **P4A.3** Move deterministic generation into `MockProvider`
+- [x] **P4A.4** Route `POST /changes` through agent service before persistence
+- [x] **P4A.5** Test provider mapping, invalid responses, selection, and API failure behavior
+
+### Phase 4B: First Real Provider
+
+- [ ] **P4B.1** Select the first provider and default model
+- [ ] **P4B.2** Implement its direct API adapter with structured output
+- [ ] **P4B.3** Load API credentials from environment variables only
+- [ ] **P4B.4** Add timeout, cancellation, and user-facing provider errors
+- [ ] **P4B.5** Add loading and duplicate-submit protection to the agent panel
+
+### Phase 4C: Prompt Contract
+
+- [ ] **P4C.1** Define the system prompt and structured response schema
+- [ ] **P4C.2** Express scope, intensity, timing, and avoid as prompt constraints
+- [ ] **P4C.3** Add post-generation checks for obvious scope violations
+- [ ] **P4C.4** Add a minimal fixed prompt test set
+
+### Phase 4D: Project Context
+
+- [ ] **P4D.1** Define the minimal `agent-context.md` format
+- [ ] **P4D.2** Load and inject project context with size and error handling
+- [ ] **P4D.3** Keep musical conventions in context and machine settings in config
+
+### Phase 4E: Conversation and Revision
+
+- [ ] **P4E.1** Define session conversation state and retention boundaries
+- [ ] **P4E.2** Include recent requests, explanations, and outcomes in revisions
+- [ ] **P4E.3** Persist change audit data without storing secrets
+
+### Phase 4F: Evaluation and Prompt Tuning
+
+- [ ] **P4F.1** Build fixed musical capability scenarios
+- [ ] **P4F.2** Record syntax validity, constraint adherence, and musical review results
+- [ ] **P4F.3** Tune prompts against the evaluation set
 
 ## Phase 5: Validation and Performance Hardening
 

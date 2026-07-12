@@ -83,6 +83,13 @@ class ChangeRequest(BaseModel):
     avoid: str | None = None
 
 
+class GeneratedChange(BaseModel):
+    code: str
+    explanation: str
+    warnings: list[ChangeWarning] = Field(default_factory=list)
+    ranges: list[ChangedRange] | None = None
+
+
 class ChangeRecord(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
