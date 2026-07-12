@@ -211,6 +211,7 @@ test('agent settings use backend defaults and persist browser overrides', async 
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.locator('#settings-dialog')).toBeVisible();
   await expect(page.locator('#settings-provider')).toContainText('Backend default (mock)');
+  await expect(page.locator('#settings-provider')).toContainText('DeepSeek');
   await page.locator('#settings-provider').selectOption('openai');
   await expect(page.locator('#settings-api-key')).toBeEnabled();
   await expect(page.locator('#settings-model')).toHaveAttribute('placeholder', 'Default: gpt-5.6-terra');

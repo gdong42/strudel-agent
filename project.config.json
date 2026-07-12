@@ -6,8 +6,8 @@
     "maxAgeHours": 24
   },
   "agent": {
-    "provider": "mock",
-    "model": null,
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
     "contextFile": "agent-context.md"
   },
   "samples": {

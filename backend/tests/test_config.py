@@ -6,6 +6,13 @@ from app.config import load_config
 from app.paths import snapshots_dir, track_path
 
 
+def test_repository_defaults_to_deepseek_v4_pro() -> None:
+    config = load_config()
+
+    assert config.agent.provider == "deepseek"
+    assert config.agent.model == "deepseek-v4-pro"
+
+
 def test_load_config_defaults_when_file_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("STRUDEL_AGENT_ROOT", str(tmp_path))
 

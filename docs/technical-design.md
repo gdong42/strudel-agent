@@ -169,7 +169,8 @@ contract, and validates that the provider returned non-empty code and explanatio
 Initial provider examples:
 
 - `OpenAIProvider`: direct Responses API call with strict JSON Schema output.
-- `AnthropicProvider`: direct Anthropic API call with structured output.
+- `DeepSeekProvider`: OpenAI-compatible Chat Completions with JSON Output and application-side schema validation.
+- `AnthropicProvider`: future direct Anthropic API adapter.
 - `MockProvider`: deterministic local provider for tests and UI development.
 
 The first real adapter is OpenAI. It uses `gpt-5.6-terra` as its built-in
@@ -178,6 +179,14 @@ configuration to override the model. Requests use low reasoning effort, a
 45-second timeout, `store: false`, and a Pydantic-generated strict schema. See
 the official [latest model guide](https://developers.openai.com/api/docs/guides/latest-model.md)
 and [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+The checked-in project default is DeepSeek `deepseek-v4-pro`. Its adapter uses
+the official Chat Completions endpoint, disables thinking for lower live-coding
+latency, requests JSON Output, and validates the result with Pydantic. DeepSeek
+JSON Output does not guarantee schema adherence and may occasionally return empty
+content, so either case is surfaced as a provider error without persisting a
+change. See the official [DeepSeek quick start](https://api-docs.deepseek.com/zh-cn/)
+and [JSON Output guide](https://api-docs.deepseek.com/zh-cn/guides/json_mode/).
 
 ### 6.4 POST /changes — Request
 
@@ -341,8 +350,8 @@ GET  /samples                    List known samples
     "maxAgeHours": 24
   },
   "agent": {
-    "provider": "mock",
-    "model": null,
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
     "contextFile": "agent-context.md"
   },
   "samples": {

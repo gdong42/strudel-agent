@@ -64,6 +64,7 @@
 - [x] **P4B2.3** Add timeout, cancellation, and user-facing provider errors
 - [x] **P4B2.4** Add loading, cancellation, and duplicate-submit behavior to the agent panel
 - [x] **P4B2.5** Record provider, model, and latency without persisting credentials
+- [x] **P4B2.6** Add DeepSeek Chat Completions support and use `deepseek-v4-pro` by default
 
 ### Phase 4B.3: Concurrent Editing
 

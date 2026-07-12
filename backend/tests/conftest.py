@@ -7,6 +7,7 @@ import pytest
 
 @pytest.fixture
 def project_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    monkeypatch.setenv("STRUDEL_AGENT_ROOT", str(tmp_path))
     track_path = tmp_path / "tracks" / "main.strudel.js"
     snapshots_dir = tmp_path / "snapshots"
     changes_dir = tmp_path / "changes"
