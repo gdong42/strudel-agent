@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.agent import AgentConfigurationError, AgentResponseError, AgentService, create_agent_service
+from app.config import AgentConfig, ProjectConfig
 from app.models import ChangeRequest, GeneratedChange
 from app.providers.base import ProviderRequest
 from app.providers.mock import MockProvider
@@ -32,6 +33,8 @@ async def test_agent_maps_change_request_to_provider_contract() -> None:
     )
 
     assert result.code == 's("bd*4")'
+    assert result.provider == "unknown"
+    assert result.latency_ms >= 0
     assert provider.request == ProviderRequest(
         intent="add energy",
         current_code='s("bd")',
@@ -60,3 +63,20 @@ async def test_mock_provider_is_deterministic() -> None:
 def test_unknown_provider_is_a_configuration_error() -> None:
     with pytest.raises(AgentConfigurationError, match="unknown-provider"):
         create_agent_service("unknown-provider")
+
+
+def test_openai_requires_an_api_key() -> None:
+    with pytest.raises(AgentConfigurationError, match="API key"):
+        create_agent_service("openai")
+
+
+def test_openai_uses_configured_default_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.agent.load_config",
+        lambda: ProjectConfig(agent=AgentConfig(provider="openai", model="configured-model")),
+    )
+
+    service = create_agent_service(api_key="test-key")
+
+    assert service.provider_name == "openai"
+    assert service.model == "configured-model"

@@ -168,9 +168,16 @@ contract, and validates that the provider returned non-empty code and explanatio
 
 Initial provider examples:
 
-- `OpenAIProvider`: direct OpenAI API call with structured output.
+- `OpenAIProvider`: direct Responses API call with strict JSON Schema output.
 - `AnthropicProvider`: direct Anthropic API call with structured output.
 - `MockProvider`: deterministic local provider for tests and UI development.
+
+The first real adapter is OpenAI. It uses `gpt-5.6-terra` as its built-in
+balance of capability, latency, and cost, while allowing browser or backend
+configuration to override the model. Requests use low reasoning effort, a
+45-second timeout, `store: false`, and a Pydantic-generated strict schema. See
+the official [latest model guide](https://developers.openai.com/api/docs/guides/latest-model.md)
+and [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 ### 6.4 POST /changes — Request
 
@@ -211,6 +218,9 @@ class ChangeWarning(BaseModel):
     message: str
     category: Literal["sample", "visual", "structure", "performance", "mini-notation"]
 ```
+
+Persisted change records also include `provider`, `model`, and `latencyMs` for
+diagnostics and later evaluation. Credentials are never included.
 
 ### 6.6 Auto Fire Validation
 

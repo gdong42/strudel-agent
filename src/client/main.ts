@@ -26,6 +26,7 @@ let repl: ReplAdapter | null = null;
 let state: RuntimeStateStore | null = null;
 let applyingRemoteCode = false;
 let snapshotsCache: SnapshotRecord[] = [];
+let activeAgentRequest: AbortController | null = null;
 
 const replElement = requireElement<HTMLElement>('#repl');
 const evaluateButton = requireElement<HTMLButtonElement>('#evaluate');
@@ -39,6 +40,7 @@ const agentPanel = new AgentPanel(
   requireElement<HTMLTextAreaElement>('#agent-intent'),
   requireElement<HTMLInputElement>('#auto-fire'),
   requireElement<HTMLButtonElement>('#stage-change'),
+  requireElement<HTMLButtonElement>('#cancel-change'),
   requireElement<HTMLButtonElement>('#undo-change'),
   requireElement<HTMLElement>('#agent-explanation'),
   requireElement<HTMLElement>('#agent-warnings'),
@@ -132,11 +134,18 @@ async function evaluate(): Promise<void> {
 }
 
 async function stageAgentChange(value: { intent: string; applyMode: 'manual' | 'auto' }): Promise<void> {
-  if (!repl || !state) return;
+  if (!repl || !state || activeAgentRequest) return;
+  const request = new AbortController();
+  activeAgentRequest = request;
   agentPanel.setBusy(true);
+  status.set('Agent is generating a change...', 'warn');
   try {
     const currentCode = repl.getCode();
-    const change = await createChange({ ...value, currentCode }, settingsPanel.getConnection());
+    const change = await createChange(
+      { ...value, currentCode },
+      settingsPanel.getConnection(),
+      request.signal,
+    );
     applyingRemoteCode = true;
     repl.setCode(change.code);
     applyingRemoteCode = false;
@@ -156,8 +165,13 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
     }
   } catch (error) {
     applyingRemoteCode = false;
-    status.set(error instanceof Error ? error.message : String(error), 'error');
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      status.set('Agent request cancelled.', 'warn');
+    } else {
+      status.set(error instanceof Error ? error.message : String(error), 'error');
+    }
   } finally {
+    if (activeAgentRequest === request) activeAgentRequest = null;
     agentPanel.setBusy(false);
   }
 }
@@ -312,6 +326,7 @@ panicButton.addEventListener('click', () => {
 
 agentPanel.onSubmit((value) => { stageAgentChange(value); });
 agentPanel.onUndo(() => { undoAgentStage(); });
+agentPanel.onCancel(() => { activeAgentRequest?.abort(); });
 
 boot().catch((error) => {
   status.set(error instanceof Error ? error.message : String(error), 'error');

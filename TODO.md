@@ -59,11 +59,11 @@
 
 ### Phase 4B.2: First Real Provider
 
-- [ ] **P4B2.1** Select the first provider and default model
-- [ ] **P4B2.2** Implement its direct API adapter with structured output
-- [ ] **P4B2.3** Add timeout, cancellation, and user-facing provider errors
-- [ ] **P4B2.4** Add loading, cancellation, and duplicate-submit behavior to the agent panel
-- [ ] **P4B2.5** Record provider, model, and latency without persisting credentials
+- [x] **P4B2.1** Select the first provider and default model
+- [x] **P4B2.2** Implement its direct API adapter with structured output
+- [x] **P4B2.3** Add timeout, cancellation, and user-facing provider errors
+- [x] **P4B2.4** Add loading, cancellation, and duplicate-submit behavior to the agent panel
+- [x] **P4B2.5** Record provider, model, and latency without persisting credentials
 
 ### Phase 4B.3: Concurrent Editing
 

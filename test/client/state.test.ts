@@ -99,7 +99,8 @@ it('stages and undoes an agent change without changing active code', () => {
   store.stageChange({
     id: 'change-1', projectId: 'p', sessionId: 's', createdAt: 1,
     intent: 'more groove', applyMode: 'manual',
-    preAgentCode: 'old', code: 'new', explanation: 'changed groove', warnings: [], undoneAt: null,
+    preAgentCode: 'old', code: 'new', explanation: 'changed groove',
+    provider: 'mock', model: null, latencyMs: 1, warnings: [], undoneAt: null,
   });
 
   expect(store.get().activeCode).toBe(initialState.activeCode);

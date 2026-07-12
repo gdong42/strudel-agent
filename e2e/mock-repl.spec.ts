@@ -185,6 +185,25 @@ test('auto fire evaluates a valid staged agent change', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(1);
 });
 
+test('an in-flight agent request can be cancelled without changing the editor', async ({ page }) => {
+  await page.route('**/changes', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await route.abort();
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
+  const before = await page.getByTestId('mock-editor').inputValue();
+
+  await page.locator('#agent-intent').fill('make a long transition');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+  await expect(page.getByRole('button', { name: 'Stage change' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+
+  await expect(page.locator('#status')).toContainText('cancelled');
+  await expect(page.getByTestId('mock-editor')).toHaveValue(before);
+  await expect(page.getByRole('button', { name: 'Stage change' })).toBeEnabled();
+});
+
 test('agent settings use backend defaults and persist browser overrides', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#agent-provider-summary')).toHaveText('mock');
@@ -192,6 +211,10 @@ test('agent settings use backend defaults and persist browser overrides', async 
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.locator('#settings-dialog')).toBeVisible();
   await expect(page.locator('#settings-provider')).toContainText('Backend default (mock)');
+  await page.locator('#settings-provider').selectOption('openai');
+  await expect(page.locator('#settings-api-key')).toBeEnabled();
+  await expect(page.locator('#settings-model')).toHaveAttribute('placeholder', 'Default: gpt-5.6-terra');
+  await page.locator('#settings-provider').selectOption('');
   await page.getByRole('button', { name: 'Test connection' }).click();
   await expect(page.locator('#settings-message')).toContainText('ready');
 

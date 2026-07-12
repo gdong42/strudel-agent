@@ -118,7 +118,15 @@ def test_agent_settings_exposes_defaults_without_secrets(project_paths: dict[str
     assert response.json() == {
         "defaultProvider": "mock",
         "defaultModel": None,
-        "providers": [{"id": "mock", "label": "Mock", "requiresApiKey": False}],
+        "providers": [
+            {"id": "mock", "label": "Mock", "requiresApiKey": False, "defaultModel": None},
+            {
+                "id": "openai",
+                "label": "OpenAI",
+                "requiresApiKey": True,
+                "defaultModel": "gpt-5.6-terra",
+            },
+        ],
     }
 
 

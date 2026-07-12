@@ -8,12 +8,14 @@ export interface AgentFormValue {
 export class AgentPanel {
   private submitHandler: ((value: AgentFormValue) => void) | null = null;
   private undoHandler: (() => void) | null = null;
+  private cancelHandler: (() => void) | null = null;
 
   constructor(
     form: HTMLFormElement,
     private readonly intent: HTMLTextAreaElement,
     private readonly autoFire: HTMLInputElement,
     private readonly submit: HTMLButtonElement,
+    private readonly cancel: HTMLButtonElement,
     private readonly undo: HTMLButtonElement,
     private readonly explanation: HTMLElement,
     private readonly warnings: HTMLElement,
@@ -28,11 +30,16 @@ export class AgentPanel {
       });
     });
     undo.addEventListener('click', () => this.undoHandler?.());
+    cancel.addEventListener('click', () => this.cancelHandler?.());
   }
 
   onSubmit(handler: (value: AgentFormValue) => void): void { this.submitHandler = handler; }
   onUndo(handler: () => void): void { this.undoHandler = handler; }
-  setBusy(busy: boolean): void { this.submit.disabled = busy; }
+  onCancel(handler: () => void): void { this.cancelHandler = handler; }
+  setBusy(busy: boolean): void {
+    this.submit.disabled = busy;
+    this.cancel.hidden = !busy;
+  }
   disableAutoFire(): void { this.autoFire.checked = false; }
 
   showChange(change: ChangeRecord): void {

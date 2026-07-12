@@ -5,14 +5,14 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from .models import ChangeRecord, ChangeRequest, GeneratedChange, LOCAL_PROJECT_ID, LOCAL_SESSION_ID
+from .models import AgentResult, ChangeRecord, ChangeRequest, LOCAL_PROJECT_ID, LOCAL_SESSION_ID
 from .paths import changes_dir
 
 
 CHANGES_DIR = changes_dir()
 
 
-def create_change(request: ChangeRequest, generated: GeneratedChange) -> ChangeRecord:
+def create_change(request: ChangeRequest, generated: AgentResult) -> ChangeRecord:
     now = int(time.time() * 1000)
     record = ChangeRecord(
         id=f"{now}-{uuid4().hex[:8]}",
@@ -24,6 +24,9 @@ def create_change(request: ChangeRequest, generated: GeneratedChange) -> ChangeR
         preAgentCode=request.current_code,
         code=generated.code,
         explanation=generated.explanation,
+        provider=generated.provider,
+        model=generated.model,
+        latencyMs=generated.latency_ms,
         warnings=generated.warnings,
         ranges=generated.ranges,
     )

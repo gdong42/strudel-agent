@@ -165,19 +165,30 @@ export class SettingsPanel {
     if (!this.backend) return;
     const selected = this.provider.value || this.backend.defaultProvider;
     const requiresKey = this.providerRequiresKey(selected);
+    const defaultModel = this.provider.value
+      ? this.providerDefaultModel(selected)
+      : this.backend.defaultModel || this.providerDefaultModel(selected);
     this.apiKey.disabled = !requiresKey;
     this.remember.disabled = !requiresKey;
     this.clearKeyButton.disabled = !this.settings.apiKey && !this.apiKey.value;
+    this.model.placeholder = defaultModel ? `Default: ${defaultModel}` : 'Use provider default';
   }
 
   private renderSummary(): void {
     if (!this.backend) return;
     const provider = this.settings.provider || this.backend.defaultProvider;
-    const model = this.settings.model || this.backend.defaultModel;
+    const defaultModel = this.settings.provider
+      ? this.providerDefaultModel(provider)
+      : this.backend.defaultModel || this.providerDefaultModel(provider);
+    const model = this.settings.model || defaultModel;
     this.summary.textContent = model ? `${provider} / ${model}` : provider;
   }
 
   private providerRequiresKey(provider: string | null): boolean {
     return this.backend?.providers.find((item) => item.id === provider)?.requiresApiKey ?? false;
+  }
+
+  private providerDefaultModel(provider: string | null): string | null {
+    return this.backend?.providers.find((item) => item.id === provider)?.defaultModel ?? null;
   }
 }

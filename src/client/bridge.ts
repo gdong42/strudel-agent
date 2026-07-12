@@ -49,6 +49,9 @@ export interface ChangeRecord {
   preAgentCode: string;
   code: string;
   explanation: string;
+  provider: string;
+  model: string | null;
+  latencyMs: number | null;
   warnings: ChangeWarning[];
   undoneAt: number | null;
 }
@@ -63,6 +66,7 @@ export interface ProviderInfo {
   id: string;
   label: string;
   requiresApiKey: boolean;
+  defaultModel: string | null;
 }
 
 export interface AgentSettingsPayload {
@@ -156,7 +160,11 @@ export async function revertSnapshot(snapshotId: string): Promise<SnapshotRevert
   return response.json() as Promise<SnapshotRevertPayload>;
 }
 
-export async function createChange(payload: ChangeRequestPayload, connection?: AgentConnection): Promise<ChangeRecord> {
+export async function createChange(
+  payload: ChangeRequestPayload,
+  connection?: AgentConnection,
+  signal?: AbortSignal,
+): Promise<ChangeRecord> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (connection?.provider) headers['X-Agent-Provider'] = connection.provider;
   if (connection?.model) headers['X-Agent-Model'] = connection.model;
@@ -165,9 +173,10 @@ export async function createChange(payload: ChangeRequestPayload, connection?: A
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
+    signal,
   });
   if (!response.ok) {
-    throw new Error((await response.text()) || `Failed to stage change: ${response.status}`);
+    throw new Error(await responseError(response, `Failed to stage change: ${response.status}`));
   }
   return response.json() as Promise<ChangeRecord>;
 }
@@ -184,7 +193,7 @@ export async function testAgentProvider(connection: AgentConnection): Promise<{ 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(connection),
   });
-  if (!response.ok) throw new Error((await response.text()) || `Provider test failed: ${response.status}`);
+  if (!response.ok) throw new Error(await responseError(response, `Provider test failed: ${response.status}`));
   return response.json() as Promise<{ ok: boolean; message: string }>;
 }
 
@@ -194,4 +203,15 @@ export async function undoChange(changeId: string): Promise<{ change: ChangeReco
     throw new Error((await response.text()) || `Failed to undo change: ${response.status}`);
   }
   return response.json() as Promise<{ change: ChangeRecord; code: string }>;
+}
+
+async function responseError(response: Response, fallback: string): Promise<string> {
+  const body = await response.text();
+  if (!body) return fallback;
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown };
+    return typeof parsed.detail === 'string' ? parsed.detail : fallback;
+  } catch {
+    return body;
+  }
 }

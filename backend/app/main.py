@@ -5,7 +5,7 @@ import json
 import time
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -140,6 +140,7 @@ async def test_agent_provider(payload: ProviderTestRequest) -> dict[str, Any]:
 @app.post("/changes")
 async def post_change(
     payload: ChangeRequest,
+    request: Request,
     x_agent_provider: str | None = Header(default=None),
     x_agent_model: str | None = Header(default=None),
     x_agent_api_key: str | None = Header(default=None),
@@ -155,9 +156,11 @@ async def post_change(
             api_key=x_agent_api_key,
         ).create_change(payload)
     except AgentConfigurationError as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except (AgentResponseError, ProviderError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+    if await request.is_disconnected():
+        raise HTTPException(status_code=499, detail="Agent request was cancelled")
     return create_change(payload, generated).model_dump(by_alias=True)
 
 

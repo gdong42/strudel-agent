@@ -86,6 +86,12 @@ class GeneratedChange(BaseModel):
     ranges: list[ChangedRange] | None = None
 
 
+class AgentResult(GeneratedChange):
+    provider: str
+    model: str | None = None
+    latency_ms: int = Field(alias="latencyMs")
+
+
 class ChangeRecord(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -98,6 +104,9 @@ class ChangeRecord(BaseModel):
     pre_agent_code: str = Field(alias="preAgentCode")
     code: str
     explanation: str
+    provider: str = "unknown"
+    model: str | None = None
+    latency_ms: int | None = Field(default=None, alias="latencyMs")
     warnings: list[ChangeWarning] = Field(default_factory=list)
     ranges: list[ChangedRange] | None = None
     undone_at: int | None = Field(default=None, alias="undoneAt")
@@ -118,6 +127,7 @@ class ProviderInfo(BaseModel):
     id: str
     label: str
     requires_api_key: bool = Field(alias="requiresApiKey")
+    default_model: str | None = Field(default=None, alias="defaultModel")
 
 
 class AgentSettingsResponse(BaseModel):
