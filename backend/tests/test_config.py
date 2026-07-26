@@ -11,6 +11,9 @@ def test_repository_defaults_to_deepseek_v4_pro() -> None:
 
     assert config.agent.provider == "deepseek"
     assert config.agent.model == "deepseek-v4-pro"
+    assert config.agent.runtime.max_turns == 8
+    assert config.agent.runtime.max_elapsed_seconds == 90
+    assert config.agent.runtime.max_total_tokens == 50_000
 
 
 def test_load_config_defaults_when_file_missing(tmp_path: Path, monkeypatch) -> None:
@@ -31,6 +34,13 @@ def test_load_config_reads_project_config(tmp_path: Path, monkeypatch) -> None:
         """
         {
           "trackFile": "tracks/live.strudel.js",
+          "agent": {
+            "runtime": {
+              "maxTurns": 3,
+              "maxElapsedSeconds": 12,
+              "maxTotalTokens": 900
+            }
+          },
           "snapshots": {
             "directory": "history",
             "maxCount": 3,
@@ -47,5 +57,8 @@ def test_load_config_reads_project_config(tmp_path: Path, monkeypatch) -> None:
     assert config.snapshots.directory == "history"
     assert config.snapshots.max_count == 3
     assert config.snapshots.max_age_hours == 2
+    assert config.agent.runtime.max_turns == 3
+    assert config.agent.runtime.max_elapsed_seconds == 12
+    assert config.agent.runtime.max_total_tokens == 900
     assert track_path() == tmp_path / "tracks" / "live.strudel.js"
     assert snapshots_dir() == tmp_path / "history"

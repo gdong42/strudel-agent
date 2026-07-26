@@ -17,10 +17,17 @@ class SnapshotConfig(BaseModel):
     directory: str = "snapshots"
 
 
+class AgentRuntimeConfig(BaseModel):
+    max_turns: int = Field(default=8, alias="maxTurns", ge=1)
+    max_elapsed_seconds: int = Field(default=90, alias="maxElapsedSeconds", ge=1)
+    max_total_tokens: int = Field(default=50_000, alias="maxTotalTokens", ge=1)
+
+
 class AgentConfig(BaseModel):
     provider: str = "mock"
     model: str | None = None
     context_file: str = Field(default="agent-context.md", alias="contextFile")
+    runtime: AgentRuntimeConfig = Field(default_factory=AgentRuntimeConfig)
 
 
 class SampleConfig(BaseModel):

@@ -85,18 +85,24 @@ workflow.
 - [x] **P4C.2** Define `AgentRun`, model-turn, tool-call, final-result, and failure contracts
 - [x] **P4C.3** Refactor providers from one-shot `create_change` into vendor-neutral model turns with normalized tool calls
 - [x] **P4C.4** Implement the tool registry with `inspect_diff`, `validate_candidate`, `finalize_change`, and `request_user_input`
-- [ ] **P4C.5** Implement the bounded Agent Runtime loop with turn, time, token, and cancellation budgets
-- [ ] **P4C.6** Add run APIs and events for `running`, `needs_input`, `completed`, `failed`, and `cancelled`
-- [ ] **P4C.7** Stage and persist only completed final changes; keep candidates and recoverable validation failures internal
-- [ ] **P4C.8** Feed concurrent editor updates back into the active run and retire the client-side fixed reconciliation loop
-- [ ] **P4C.9** Test loop continuation, tool errors, budget exhaustion, cancellation, and final-only staging
+- [x] **P4C.5.1** Add validated Run construction, immutable transitions, and a scripted model-turn test provider
+- [ ] **P4C.5.2** Execute one model turn, run ordered tool calls, and return serialized tool results to the model
+- [ ] **P4C.5.3** Handle `finalize_change`, `request_user_input`, and invalid plain-text/terminal tool outcomes
+- [ ] **P4C.5.4** Enforce turn, time, and token budgets; cancel active provider work and sanitize terminal failures
+- [ ] **P4C.6.1** Add in-memory Run storage and background-task ownership with credentials retained only for the active task
+- [ ] **P4C.6.2** Add start/read Run endpoints and public lifecycle events
+- [ ] **P4C.6.3** Add input, editor-update, and cancel commands for active Runs
+- [ ] **P4C.7.1** Replace the client generation path with Run status handling and final-only Manual Fire staging
+- [ ] **P4C.7.2** Add an editor-hash stage acknowledgement that persists a change only after the final Run is accepted
+- [ ] **P4C.7.3** Enable Auto Fire only after accepted staging and deterministic finalization gates
+- [ ] **P4C.8** Return stale finals to the active Run on editor updates; delete `POST /changes` generation and the fixed client reconciliation loop
+- [ ] **P4C.9** Add runtime integration and Mock-REPL E2E coverage for loops, failures, cancellation, stale finals, and final-only staging
 
 ### Phase 4D: Human-in-the-Loop Clarification
 
-- [ ] **P4D.1** Define when the agent may request user input: material ambiguity, conflicting constraints, or key creative decisions
-- [ ] **P4D.2** Add `needs_input` question/option UI without exposing internal candidates or validation findings
-- [ ] **P4D.3** Resume the same Agent Run with the user's answer and latest editor version
-- [ ] **P4D.4** Test pause, reload/reconnect, answer, cancel, and resume behavior
+- [ ] **P4D.1** Add `needs_input` question/option UI without exposing internal candidates or validation findings
+- [ ] **P4D.2** Resume the same Agent Run with the user's answer and latest editor version
+- [ ] **P4D.3** Test pause, reload/reconnect, answer, cancel, and resume behavior
 
 ### Phase 4E: Project Context
 
@@ -112,21 +118,19 @@ workflow.
 
 ### Phase 4G: Evaluation and Agent Tuning
 
-- [ ] **P4G.1** Build fixed musical capability scenarios
+- [ ] **P4G.1** Build a baseline set of fixed musical capability scenarios immediately after the Run migration
 - [ ] **P4G.2** Record final syntax validity, constraint adherence, loop/tool behavior, and musical review results
 - [ ] **P4G.3** Tune agent instructions, tools, and budgets against the evaluation set
 
 ## Phase 5: Validation and Performance Hardening
 
 - [ ] **P5.1** Implement `backend/app/samples.py` and expose sample lookup/validation as an internal agent tool
-- [ ] **P5.2** Add non-performing Strudel syntax and mini-notation validation tools
-- [ ] **P5.3** Add visual and structural diff inspection tools for the agent's self-review
-- [ ] **P5.4** Require the agent to resolve recoverable findings before finalization; surface only irreducible final risks
-- [ ] **P5.5** Allow Auto Fire only for completed runs that pass deterministic finalization gates
+- [ ] **P5.2** Upgrade heuristic candidate checks with available Strudel syntax and mini-notation validation
+- [ ] **P5.3** Add richer visual and structural diff inspection tools for the agent's self-review
 - [ ] **P5.6** Add visual disable toggle and browser performance logging for audio-critical performance
 - [ ] **P5.7** Panic flow: confirm dialog → stop audio → clear visuals → optional REPL reload
 - [ ] **P5.8** Extend capability tests with "only change drums", "increase energy 10%", and conflicting-constraint scenarios
-- [ ] **P5.9** Write automated tests for Agent Run, client state, validation tools, and finalization invariants
+- [ ] **P5.9** Extend finalization, validation, and performance regression coverage beyond the Phase 4 Run migration suite
 
 ---
 
@@ -135,6 +139,6 @@ workflow.
 - Phase 2 depends on Phase 1 (no Pydantic models or client state machine without the shell)
 - Phase 3 depends on Phase 2 (needs state model, config, and recovery behavior)
 - Phase 4 depends on Phase 3 (the runtime needs a safe final staging boundary)
-- Phase 4D depends on the resumable run contract from Phase 4C
+- Phase 4D depends on the resumable Run API from Phase 4C
 - Phase 4E–4G depend on Agent Run state and tool execution from Phase 4C
-- Phase 5 depends on Phase 4C (validation is an agent tool/finalization concern, not a separate user review flow)
+- Phase 5 extends Phase 4C validation and finalization; it does not introduce a separate user review flow

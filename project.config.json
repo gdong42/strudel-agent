@@ -8,7 +8,12 @@
   "agent": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
-    "contextFile": "agent-context.md"
+    "contextFile": "agent-context.md",
+    "runtime": {
+      "maxTurns": 8,
+      "maxElapsedSeconds": 90,
+      "maxTotalTokens": 50000
+    }
   },
   "samples": {
     "registryPath": "samples"

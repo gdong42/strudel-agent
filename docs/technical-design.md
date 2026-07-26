@@ -205,6 +205,13 @@ The current `create_change()` adapters are a transitional one-shot
 implementation. They remain usable while P4C introduces `next_turn()` and moves
 generation control into the runtime.
 
+This repository is in active development, not a released compatibility surface.
+When the Run API reaches the browser, it replaces the one-shot generation path
+directly: the generation form of `POST /changes` and the fixed client-side
+reconciliation loop are removed rather than preserved behind adapters or data
+migrations. Existing change-history and snapshot data are development fixtures,
+not an API compatibility constraint.
+
 Current providers remain direct API integrations:
 
 - OpenAI uses the Responses API and `gpt-5.6-terra` by default.
