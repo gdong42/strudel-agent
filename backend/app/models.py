@@ -162,7 +162,7 @@ class AgentQuestion(BaseModel):
 class RequestUserInput(BaseModel):
     """Internal tool arguments. `reason` is deliberately absent from public state."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     question_id: str = Field(alias="questionId", min_length=1)
     question: str = Field(min_length=1)

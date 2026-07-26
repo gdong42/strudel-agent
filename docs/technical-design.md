@@ -230,7 +230,7 @@ Initial runtime tools:
   the agent's self-review.
 - `validate_candidate(candidate_code)`: run available non-performing syntax,
   mini-notation, sample, structural, and safety checks.
-- `finalize_change(code, explanation, warnings)`: request completion. The
+- `finalize_change(code, explanation, action, warnings)`: request completion. The
   runtime applies deterministic finalization gates before accepting it.
 - `request_user_input(question, options, reason)`: pause only for material
   ambiguity, conflicting constraints, or a key user decision.
