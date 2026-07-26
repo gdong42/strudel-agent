@@ -167,6 +167,22 @@ class AgentProvider(Protocol):
 contract, and validates that the provider returned non-empty code and explanation.
 `changes.py` persists only validated generated changes.
 
+### 6.3.1 Prompt Contract
+
+`backend/app/prompt_contract.py` owns the vendor-neutral system prompt, JSON
+input builder, and strict response schema. Every real provider must return:
+
+- complete replacement `code`;
+- concise `explanation`;
+- explicit `action` of `apply` or `noop`;
+- a `warnings` array using the shared warning schema.
+
+The contract requires `noop` to return the current code unchanged, preserve
+unrequested music and visuals, and treat code plus natural-language intent as
+data rather than prompt instructions. Reconciliation context uses the same
+input contract, so the rules remain identical across the initial and follow-up
+generation turns. Provider modules only map this contract to their API format.
+
 Initial provider examples:
 
 - `OpenAIProvider`: direct Responses API call with strict JSON Schema output.
@@ -226,8 +242,8 @@ class ChangeResponse(BaseModel):
     # "noop" must return current_code unchanged
     action: Literal["apply", "noop"] = "apply"
 
-    # Structured warnings
-    warnings: list[ChangeWarning] = []
+    # Structured warnings; required, use [] when none apply
+    warnings: list[ChangeWarning]
 
     # Changed ranges (for diff highlighting; optional but recommended)
     ranges: list[ChangedRange] | None = None
@@ -268,6 +284,7 @@ If validation fails with warnings at `risk` level, the change is staged but NOT 
 | `backend/app/snapshots.py` | Snapshot CRUD, pruning (keep last 50 or 24h) |
 | `backend/app/changes.py` | `POST /changes`, `GET /changes/latest`, `POST /changes/:id/undo` |
 | `backend/app/agent.py` | Prompt construction, provider selection, response parsing, validation |
+| `backend/app/prompt_contract.py` | Shared agent instructions, JSON request construction, and strict provider response schema |
 | `backend/app/providers/` | Vendor-specific direct API adapters behind a stable provider interface |
 | `backend/app/samples.py` | Sample registry (list known sample names from `samples/` config) |
 | `backend/app/config.py` | Load and watch `project.config.json` |
@@ -313,6 +330,7 @@ GET  /samples                    List known samples
 │   │   ├── __init__.py
 │   │   ├── main.py
 │   │   ├── agent.py
+│   │   ├── prompt_contract.py
 │   │   ├── changes.py
 │   │   ├── tracks.py
 │   │   ├── snapshots.py

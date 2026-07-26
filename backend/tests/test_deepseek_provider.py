@@ -30,6 +30,8 @@ async def test_deepseek_provider_uses_json_output_and_parses_change() -> None:
                         "content": json.dumps({
                             "code": 's("bd ~ ~ ~")',
                             "explanation": "Opened space for a break.",
+                            "action": "apply",
+                            "warnings": [],
                         })
                     },
                 }]
@@ -49,7 +51,7 @@ async def test_deepseek_provider_includes_reconciliation_context() -> None:
         payload = json.loads(request.content)
         prompt = json.loads(payload["messages"][1]["content"])
         assert prompt["reconciliation"]["user_edit_diff"] == '+ s("hh")'
-        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '{"code":"s(\\"hh\\")","explanation":"Kept hats.","action":"noop"}'}}]})
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '{"code":"s(\\"hh\\")","explanation":"Kept hats.","action":"noop","warnings":[]}'}}]})
 
     reconciliation = ChangeRequest(
         intent="keep the hats",

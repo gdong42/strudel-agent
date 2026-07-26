@@ -76,7 +76,7 @@
 
 ### Phase 4C: Prompt Contract
 
-- [ ] **P4C.1** Define the system prompt and structured response schema
+- [x] **P4C.1** Define the shared system prompt, JSON input, and structured response schema
 - [ ] **P4C.2** Interpret constraints from the user's freeform musical intent
 - [ ] **P4C.3** Add post-generation checks for obvious scope violations
 - [ ] **P4C.4** Add a minimal fixed prompt test set

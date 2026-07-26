@@ -19,7 +19,7 @@ async def test_openai_provider_sends_strict_schema_and_parses_change() -> None:
         assert payload["text"]["format"]["type"] == "json_schema"
         assert payload["text"]["format"]["strict"] is True
         assert payload["text"]["format"]["schema"]["additionalProperties"] is False
-        assert set(payload["text"]["format"]["schema"]["required"]) == {"code", "explanation"}
+        assert set(payload["text"]["format"]["schema"]["required"]) == {"code", "explanation", "action", "warnings"}
         assert set(payload["text"]["format"]["schema"]["properties"]["action"]["enum"]) == {"apply", "noop"}
         assert payload["model"] == "test-model"
         assert json.loads(payload["input"])["user_intent"] == "make it groovy"
@@ -30,7 +30,12 @@ async def test_openai_provider_sends_strict_schema_and_parses_change() -> None:
                     "type": "message",
                     "content": [{
                         "type": "output_text",
-                        "text": json.dumps({"code": 's("bd*4")', "explanation": "Added a steady kick."}),
+                        "text": json.dumps({
+                            "code": 's("bd*4")',
+                            "explanation": "Added a steady kick.",
+                            "action": "apply",
+                            "warnings": [],
+                        }),
                     }],
                 }]
             },
@@ -54,7 +59,7 @@ async def test_openai_provider_includes_reconciliation_context() -> None:
             "user_edit_diff": '+ s("hh")',
             "attempt": 1,
         }
-        return httpx.Response(200, json={"output": [{"content": [{"type": "output_text", "text": '{"code":"s(\\"hh\\")","explanation":"Kept hats.","action":"noop"}'}]}]})
+        return httpx.Response(200, json={"output": [{"content": [{"type": "output_text", "text": '{"code":"s(\\"hh\\")","explanation":"Kept hats.","action":"noop","warnings":[]}'}]}]})
 
     request = ProviderRequest(
         intent="keep the hats",
