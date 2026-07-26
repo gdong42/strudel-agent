@@ -71,17 +71,28 @@ class ChangedRange(BaseModel):
     description: str
 
 
+class ReconciliationContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    base_code: str = Field(alias="baseCode")
+    previous_agent_code: str = Field(alias="previousAgentCode")
+    user_edit_diff: str = Field(alias="userEditDiff")
+    attempt: int = Field(ge=1, le=2)
+
+
 class ChangeRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     intent: str
     current_code: str = Field(alias="currentCode")
     apply_mode: Literal["manual", "auto"] = Field(default="manual", alias="applyMode")
+    reconciliation: ReconciliationContext | None = None
 
 
 class GeneratedChange(BaseModel):
     code: str
     explanation: str
+    action: Literal["apply", "noop"] = "apply"
     warnings: list[ChangeWarning] = Field(default_factory=list)
     ranges: list[ChangedRange] | None = None
 
@@ -104,6 +115,7 @@ class ChangeRecord(BaseModel):
     pre_agent_code: str = Field(alias="preAgentCode")
     code: str
     explanation: str
+    action: Literal["apply", "noop"] = "apply"
     provider: str = "unknown"
     model: str | None = None
     latency_ms: int | None = Field(default=None, alias="latencyMs")

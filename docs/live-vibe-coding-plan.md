@@ -311,6 +311,7 @@ The current single-file POC can stay as a reference, but formal development shou
 
 - Define a freeform musical intent contract and structured agent response.
 - Let the agent generate staged changes against the current editor contents.
+- When the user edits during generation, automatically reconcile against the latest editor code before staging; never silently fire a reconciled result.
 - Store prompts and staged changes in `changes/`.
 - Add agent context from `agent-context.md`.
 - Add optional project conventions:

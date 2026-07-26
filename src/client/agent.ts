@@ -48,6 +48,12 @@ export class AgentPanel {
     this.undo.disabled = false;
   }
 
+  showNoop(change: ChangeRecord): void {
+    this.explanation.textContent = change.explanation;
+    this.renderWarnings(change.warnings);
+    this.undo.disabled = true;
+  }
+
   clearChange(): void {
     this.explanation.textContent = 'No staged agent change.';
     this.warnings.replaceChildren();

@@ -156,6 +156,7 @@ the application after generation.
 class ProviderRequest:
     intent: str
     current_code: str
+    reconciliation: ReconciliationContext | None
 
 class AgentProvider(Protocol):
     async def create_change(self, request: ProviderRequest) -> GeneratedChange:
@@ -173,7 +174,7 @@ Initial provider examples:
 - `AnthropicProvider`: future direct Anthropic API adapter.
 - `MockProvider`: deterministic local provider for tests and UI development.
 
-The first real adapter is OpenAI. It uses `gpt-5.6-terra` as its built-in
+OpenAI uses `gpt-5.6-terra` as its built-in
 balance of capability, latency, and cost, while allowing browser or backend
 configuration to override the model. Requests use low reasoning effort, a
 45-second timeout, `store: false`, and a Pydantic-generated strict schema. See
@@ -199,7 +200,18 @@ class ChangeRequest(BaseModel):
     # Current context
     current_code: str              # editorCode at time of request
     apply_mode: Literal["manual", "auto"]
+    reconciliation: ReconciliationContext | None = None
 ```
+
+When the editor changes while the provider is generating, the browser captures
+the original base code and hash. It waits briefly for typing to settle, then
+automatically submits a bounded reconciliation request containing the original
+base, the previous agent result, the latest editor code, and a line diff of the
+user's edits. The provider returns either `apply` with reconciled full-file code
+or `noop` when the latest user code already satisfies the original intent. The
+browser verifies the latest hash again before staging a response; it makes at
+most two reconciliation attempts and never overwrites a newer edit. A reconciled
+result is staged for review even when Auto Fire was enabled.
 
 ### 6.5 POST /changes — Response
 
@@ -210,6 +222,9 @@ class ChangeResponse(BaseModel):
 
     # Musical explanation (human-readable, shown in the UI)
     explanation: str
+
+    # "noop" must return current_code unchanged
+    action: Literal["apply", "noop"] = "apply"
 
     # Structured warnings
     warnings: list[ChangeWarning] = []

@@ -66,12 +66,13 @@
 - [x] **P4B2.5** Record provider, model, and latency without persisting credentials
 - [x] **P4B2.6** Add DeepSeek Chat Completions support and use `deepseek-v4-pro` by default
 
-### Phase 4B.3: Concurrent Editing
+### Phase 4B.3: Concurrent Editing and Automatic Reconciliation
 
-- [ ] **P4B3.1** Capture request base code and hash
-- [ ] **P4B3.2** Detect editor changes while a provider request is running
-- [ ] **P4B3.3** Keep stale responses outside the editor as candidates
-- [ ] **P4B3.4** Add Regenerate, Use agent code, and Dismiss actions
+- [x] **P4B3.1** Capture each request's base code and SHA-256 hash
+- [x] **P4B3.2** Detect editor changes while a provider request is running
+- [x] **P4B3.3** Run up to two automatic reconciliation turns against the latest stable editor code
+- [x] **P4B3.4** Keep reconciled results staged and block Auto Fire after concurrent user edits
+- [x] **P4B3.5** Test reconciliation input, no-op responses, and browser behavior
 
 ### Phase 4C: Prompt Contract
 

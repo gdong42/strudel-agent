@@ -49,6 +49,7 @@ export interface ChangeRecord {
   preAgentCode: string;
   code: string;
   explanation: string;
+  action: 'apply' | 'noop';
   provider: string;
   model: string | null;
   latencyMs: number | null;
@@ -60,6 +61,14 @@ export interface ChangeRequestPayload {
   intent: string;
   currentCode: string;
   applyMode: ApplyMode;
+  reconciliation?: ReconciliationPayload;
+}
+
+export interface ReconciliationPayload {
+  baseCode: string;
+  previousAgentCode: string;
+  userEditDiff: string;
+  attempt: number;
 }
 
 export interface ProviderInfo {

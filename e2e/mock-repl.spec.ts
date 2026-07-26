@@ -185,6 +185,36 @@ test('auto fire evaluates a valid staged agent change', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(1);
 });
 
+test('agent automatically reconciles edits made while a change is generating', async ({ page }) => {
+  const requests: Record<string, unknown>[] = [];
+  await page.route('**/changes', async (route) => {
+    requests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
+    if (requests.length === 1) await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await page.locator('#auto-fire').check();
+  await page.locator('#agent-intent').fill('make the drums tighter');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByTestId('mock-editor').fill('s("user hats")');
+
+  await expect(page.locator('#status')).toContainText('reconciling');
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1]).toMatchObject({
+    currentCode: 's("user hats")',
+    reconciliation: {
+      baseCode: expect.any(String),
+      previousAgentCode: expect.stringContaining('Agent draft: make the drums tighter'),
+      userEditDiff: expect.stringContaining('user hats'),
+      attempt: 1,
+    },
+  });
+  await expect(page.getByTestId('mock-editor')).toHaveValue(/s\("user hats"\)[\s\S]*Agent draft: make the drums tighter/);
+  await expect(page.locator('#status')).toContainText('reconciled your latest edit');
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
+});
+
 test('an in-flight agent request can be cancelled without changing the editor', async ({ page }) => {
   await page.route('**/changes', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 2_000));

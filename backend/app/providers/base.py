@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..models import GeneratedChange
+from ..models import GeneratedChange, ReconciliationContext
 
 
 @dataclass(frozen=True)
 class ProviderRequest:
     intent: str
     current_code: str
+    reconciliation: ReconciliationContext | None = None
 
 
 class AgentProvider(Protocol):

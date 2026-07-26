@@ -42,10 +42,41 @@ async def test_agent_maps_change_request_to_provider_contract() -> None:
 
 
 @pytest.mark.anyio
+async def test_agent_maps_reconciliation_context_to_provider_contract() -> None:
+    provider = StubProvider(GeneratedChange(code='s("hh")', explanation="Kept the hats."))
+    service = AgentService(provider)
+
+    await service.create_change(
+        ChangeRequest(
+            intent="keep the hats",
+            currentCode='s("hh")',
+            reconciliation={
+                "baseCode": 's("bd")',
+                "previousAgentCode": 's("bd*4")',
+                "userEditDiff": '+ s("hh")',
+                "attempt": 1,
+            },
+        )
+    )
+
+    assert provider.request is not None
+    assert provider.request.reconciliation is not None
+    assert provider.request.reconciliation.previous_agent_code == 's("bd*4")'
+
+
+@pytest.mark.anyio
 async def test_agent_rejects_empty_provider_code() -> None:
     service = AgentService(StubProvider(GeneratedChange(code=" ", explanation="Nothing.")))
 
     with pytest.raises(AgentResponseError, match="empty Strudel code"):
+        await service.create_change(ChangeRequest(intent="change it", currentCode='s("bd")'))
+
+
+@pytest.mark.anyio
+async def test_agent_rejects_noop_that_changes_code() -> None:
+    service = AgentService(StubProvider(GeneratedChange(code='s("hh")', explanation="No change.", action="noop")))
+
+    with pytest.raises(AgentResponseError, match="no-op"):
         await service.create_change(ChangeRequest(intent="change it", currentCode='s("bd")'))
 
 
@@ -58,6 +89,29 @@ async def test_mock_provider_is_deterministic() -> None:
 
     assert first == second
     assert "Agent draft: add energy" in first.code
+
+
+@pytest.mark.anyio
+async def test_mock_provider_can_return_a_reconciliation_noop() -> None:
+    marker = "// Agent draft: add energy"
+    result = await MockProvider().create_change(
+        ProviderRequest(
+            intent="add energy",
+            current_code=f's("bd")\n{marker}\n',
+            reconciliation=ChangeRequest(
+                intent="add energy",
+                currentCode=f's("bd")\n{marker}\n',
+                reconciliation={
+                    "baseCode": 's("bd")',
+                    "previousAgentCode": f's("bd")\n{marker}\n',
+                    "userEditDiff": f'+ {marker}',
+                    "attempt": 1,
+                },
+            ).reconciliation,
+        )
+    )
+
+    assert result.action == "noop"
 
 
 def test_unknown_provider_is_a_configuration_error() -> None:

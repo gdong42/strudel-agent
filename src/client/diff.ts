@@ -28,6 +28,13 @@ export function computeLineDiff(before: string, after: string): DiffLine[] {
   return result;
 }
 
+export function formatLineDiff(before: string, after: string): string {
+  return computeLineDiff(before, after)
+    .filter((line) => line.kind !== 'same')
+    .map((line) => `${line.kind === 'add' ? '+' : '-'} ${line.text}`)
+    .join('\n');
+}
+
 export class DiffView {
   constructor(private readonly element: HTMLElement) {}
 

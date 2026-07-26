@@ -30,12 +30,15 @@ class AgentService:
             ProviderRequest(
                 intent=request.intent.strip(),
                 current_code=request.current_code,
+                reconciliation=request.reconciliation,
             )
         )
         if not generated.code.strip():
             raise AgentResponseError("Provider returned empty Strudel code")
         if not generated.explanation.strip():
             raise AgentResponseError("Provider returned an empty explanation")
+        if generated.action == "noop" and generated.code != request.current_code:
+            raise AgentResponseError("Provider returned a no-op that changed Strudel code")
         return AgentResult(
             **generated.model_dump(),
             provider=self.provider_name,

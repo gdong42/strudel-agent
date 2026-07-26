@@ -8,11 +8,13 @@ import {
   revertSnapshot,
   saveTrack,
   undoChange,
+  type ChangeRecord,
+  type ReconciliationPayload,
   type SnapshotRecord,
   type TrackPayload,
 } from './bridge';
 import { AgentPanel } from './agent';
-import { DiffView } from './diff';
+import { DiffView, formatLineDiff } from './diff';
 import { preflightCode } from './preflight';
 import { RecoveryView } from './recovery';
 import { createReplAdapter, type ReplAdapter } from './repl';
@@ -27,6 +29,19 @@ let state: RuntimeStateStore | null = null;
 let applyingRemoteCode = false;
 let snapshotsCache: SnapshotRecord[] = [];
 let activeAgentRequest: AbortController | null = null;
+
+const EDITOR_SETTLE_MS = 600;
+const MAX_RECONCILIATION_ATTEMPTS = 2;
+
+interface EditorVersion {
+  code: string;
+  hash: string;
+}
+
+interface AgentGeneration {
+  change: ChangeRecord;
+  reconciled: boolean;
+}
 
 const replElement = requireElement<HTMLElement>('#repl');
 const evaluateButton = requireElement<HTMLButtonElement>('#evaluate');
@@ -140,12 +155,23 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
   agentPanel.setBusy(true);
   status.set('Agent is generating a change...', 'warn');
   try {
-    const currentCode = repl.getCode();
-    const change = await createChange(
-      { ...value, currentCode },
-      settingsPanel.getConnection(),
-      request.signal,
-    );
+    const generated = await generateAgentChange(value, request.signal);
+    if (!generated) {
+      status.set('Editor kept changing. Agent did not overwrite your latest edit.', 'warn');
+      return;
+    }
+
+    const { change, reconciled } = generated;
+    if (change.action === 'noop') {
+      agentPanel.showNoop(change);
+      diffView.clear();
+      status.set(
+        reconciled ? 'Agent kept your latest edit; no additional change was needed.' : change.explanation,
+        'ok',
+      );
+      return;
+    }
+
     applyingRemoteCode = true;
     repl.setCode(change.code);
     applyingRemoteCode = false;
@@ -155,7 +181,9 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
 
     const hasRisk = change.warnings.some((warning) => warning.level === 'risk');
     const preflight = preflightCode(change.code);
-    if (value.applyMode === 'auto' && !hasRisk && preflight.errors.length === 0) {
+    if (reconciled) {
+      status.set('Agent reconciled your latest edit. Review it, then Evaluate when ready.', 'warn');
+    } else if (value.applyMode === 'auto' && !hasRisk && preflight.errors.length === 0) {
       await evaluate();
       status.set('Agent change staged and playing.', 'ok');
     } else if (value.applyMode === 'auto') {
@@ -174,6 +202,82 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
     if (activeAgentRequest === request) activeAgentRequest = null;
     agentPanel.setBusy(false);
   }
+}
+
+async function generateAgentChange(
+  value: { intent: string; applyMode: 'manual' | 'auto' },
+  signal: AbortSignal,
+): Promise<AgentGeneration | null> {
+  if (!repl) return null;
+  let base = await captureEditorVersion();
+  let change = await createChange(
+    { ...value, currentCode: base.code },
+    settingsPanel.getConnection(),
+    signal,
+  );
+
+  if ((await captureEditorVersion()).hash === base.hash) {
+    return { change, reconciled: false };
+  }
+
+  for (let attempt = 1; attempt <= MAX_RECONCILIATION_ATTEMPTS; attempt += 1) {
+    status.set('Agent is reconciling your latest edits...', 'warn');
+    const current = await waitForStableEditor(signal);
+    const reconciliation: ReconciliationPayload = {
+      baseCode: base.code,
+      previousAgentCode: change.code,
+      userEditDiff: formatLineDiff(base.code, current.code),
+      attempt,
+    };
+    change = await createChange(
+      { ...value, currentCode: current.code, reconciliation },
+      settingsPanel.getConnection(),
+      signal,
+    );
+    if ((await captureEditorVersion()).hash === current.hash) {
+      return { change, reconciled: true };
+    }
+    base = current;
+  }
+
+  return null;
+}
+
+async function captureEditorVersion(): Promise<EditorVersion> {
+  const code = repl?.getCode() ?? '';
+  const bytes = new TextEncoder().encode(code);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return { code, hash };
+}
+
+async function waitForStableEditor(signal: AbortSignal): Promise<EditorVersion> {
+  let version = await captureEditorVersion();
+  for (let checks = 0; checks < 5; checks += 1) {
+    await delay(EDITOR_SETTLE_MS, signal);
+    const next = await captureEditorVersion();
+    if (next.hash === version.hash) return next;
+    version = next;
+  }
+  return version;
+}
+
+function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      window.clearTimeout(timeout);
+      reject(new DOMException('Agent request cancelled', 'AbortError'));
+    };
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 async function undoAgentStage(): Promise<void> {

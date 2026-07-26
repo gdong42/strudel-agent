@@ -7,6 +7,7 @@ import pytest
 
 from app.providers.base import ProviderError, ProviderRequest
 from app.providers.deepseek import DeepSeekProvider
+from app.models import ChangeRequest
 
 
 @pytest.mark.anyio
@@ -40,6 +41,31 @@ async def test_deepseek_provider_uses_json_output_and_parses_change() -> None:
 
     assert result.code == 's("bd ~ ~ ~")'
     assert result.explanation == "Opened space for a break."
+
+
+@pytest.mark.anyio
+async def test_deepseek_provider_includes_reconciliation_context() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        prompt = json.loads(payload["messages"][1]["content"])
+        assert prompt["reconciliation"]["user_edit_diff"] == '+ s("hh")'
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '{"code":"s(\\"hh\\")","explanation":"Kept hats.","action":"noop"}'}}]})
+
+    reconciliation = ChangeRequest(
+        intent="keep the hats",
+        currentCode='s("hh")',
+        reconciliation={
+            "baseCode": 's("bd")',
+            "previousAgentCode": 's("bd*4")',
+            "userEditDiff": '+ s("hh")',
+            "attempt": 1,
+        },
+    ).reconciliation
+    result = await DeepSeekProvider("test-key", transport=httpx.MockTransport(handler)).create_change(
+        ProviderRequest(intent="keep the hats", current_code='s("hh")', reconciliation=reconciliation)
+    )
+
+    assert result.action == "noop"
 
 
 @pytest.mark.anyio

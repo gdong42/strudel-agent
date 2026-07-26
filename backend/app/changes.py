@@ -24,6 +24,7 @@ def create_change(request: ChangeRequest, generated: AgentResult) -> ChangeRecor
         preAgentCode=request.current_code,
         code=generated.code,
         explanation=generated.explanation,
+        action=generated.action,
         provider=generated.provider,
         model=generated.model,
         latencyMs=generated.latency_ms,
