@@ -66,7 +66,7 @@
 - [x] **P4B2.5** Record provider, model, and latency without persisting credentials
 - [x] **P4B2.6** Add DeepSeek Chat Completions support and use `deepseek-v4-pro` by default
 
-### Phase 4B.3: Concurrent Editing and Automatic Reconciliation
+### Phase 4B.3: Concurrent Editing and Automatic Reconciliation (Transitional)
 
 - [x] **P4B3.1** Capture each request's base code and SHA-256 hash
 - [x] **P4B3.2** Detect editor changes while a provider request is running
@@ -74,42 +74,59 @@
 - [x] **P4B3.4** Keep reconciled results staged and block Auto Fire after concurrent user edits
 - [x] **P4B3.5** Test reconciliation input, no-op responses, and browser behavior
 
-### Phase 4C: Prompt Contract
+The current bounded client-side reconciliation protects user edits while the
+provider is still one-shot. P4C migrates this behavior into the Agent Run so
+concurrent editor updates become new run context rather than a separate product
+workflow.
 
-- [x] **P4C.1** Define the shared system prompt, JSON input, and structured response schema
-- [ ] **P4C.2** Interpret constraints from the user's freeform musical intent
-- [ ] **P4C.3** Add post-generation checks for obvious scope violations
-- [ ] **P4C.4** Add a minimal fixed prompt test set
+### Phase 4C: Agent Runtime and Tool Loop
 
-### Phase 4D: Project Context
+- [x] **P4C.1** Define shared agent instructions and the structured final-change schema
+- [ ] **P4C.2** Define `AgentRun`, model-turn, tool-call, final-result, and failure contracts
+- [ ] **P4C.3** Refactor providers from one-shot `create_change` into vendor-neutral model turns with normalized tool calls
+- [ ] **P4C.4** Implement the tool registry with `inspect_diff`, `validate_candidate`, `finalize_change`, and `request_user_input`
+- [ ] **P4C.5** Implement the bounded Agent Runtime loop with turn, time, token, and cancellation budgets
+- [ ] **P4C.6** Add run APIs and events for `running`, `needs_input`, `completed`, `failed`, and `cancelled`
+- [ ] **P4C.7** Stage and persist only completed final changes; keep candidates and recoverable validation failures internal
+- [ ] **P4C.8** Feed concurrent editor updates back into the active run and retire the client-side fixed reconciliation loop
+- [ ] **P4C.9** Test loop continuation, tool errors, budget exhaustion, cancellation, and final-only staging
 
-- [ ] **P4D.1** Define the minimal `agent-context.md` format
-- [ ] **P4D.2** Load and inject project context with size and error handling
-- [ ] **P4D.3** Keep musical conventions in context and machine settings in config
+### Phase 4D: Human-in-the-Loop Clarification
 
-### Phase 4E: Conversation and Revision
+- [ ] **P4D.1** Define when the agent may request user input: material ambiguity, conflicting constraints, or key creative decisions
+- [ ] **P4D.2** Add `needs_input` question/option UI without exposing internal candidates or validation findings
+- [ ] **P4D.3** Resume the same Agent Run with the user's answer and latest editor version
+- [ ] **P4D.4** Test pause, reload/reconnect, answer, cancel, and resume behavior
 
-- [ ] **P4E.1** Define session conversation state and retention boundaries
-- [ ] **P4E.2** Include recent requests, explanations, and outcomes in revisions
-- [ ] **P4E.3** Persist change audit data without storing secrets
+### Phase 4E: Project Context
 
-### Phase 4F: Evaluation and Prompt Tuning
+- [ ] **P4E.1** Define the minimal `agent-context.md` format
+- [ ] **P4E.2** Load project context into each Agent Run with size and error handling
+- [ ] **P4E.3** Keep musical conventions in context and machine settings in config
 
-- [ ] **P4F.1** Build fixed musical capability scenarios
-- [ ] **P4F.2** Record syntax validity, constraint adherence, and musical review results
-- [ ] **P4F.3** Tune prompts against the evaluation set
+### Phase 4F: Conversation and Revision
+
+- [ ] **P4F.1** Define session conversation state and retention boundaries
+- [ ] **P4F.2** Include recent requests, user clarifications, final explanations, and outcomes in revisions
+- [ ] **P4F.3** Persist run/change audit data without credentials, hidden reasoning, or discarded candidate code
+
+### Phase 4G: Evaluation and Agent Tuning
+
+- [ ] **P4G.1** Build fixed musical capability scenarios
+- [ ] **P4G.2** Record final syntax validity, constraint adherence, loop/tool behavior, and musical review results
+- [ ] **P4G.3** Tune agent instructions, tools, and budgets against the evaluation set
 
 ## Phase 5: Validation and Performance Hardening
 
-- [ ] **P5.1** Implement `backend/app/samples.py`; warn on unknown samples in agent output
-- [ ] **P5.2** Visual change detection: flag any visual function modifications
-- [ ] **P5.3** Auto Fire safety: block auto-evaluate on structural or visual risk warnings
-- [ ] **P5.4** Add visual disable toggle (for low-power or audio-critical performance)
-- [ ] **P5.5** Browser performance logging for visual draw load (fps, frame time)
-- [ ] **P5.6** Panic flow: confirm dialog → stop audio → clear visuals → optional REPL reload
-- [ ] **P5.7** Add agent capability tests from spec: "only change drums" / "increase energy 10%" / "prepare break, don't evaluate"
-- [ ] **P5.8** Write automated tests for state machine transitions (§4.2)
-- [ ] **P5.9** Write automated tests for agent response validation and preflight guards
+- [ ] **P5.1** Implement `backend/app/samples.py` and expose sample lookup/validation as an internal agent tool
+- [ ] **P5.2** Add non-performing Strudel syntax and mini-notation validation tools
+- [ ] **P5.3** Add visual and structural diff inspection tools for the agent's self-review
+- [ ] **P5.4** Require the agent to resolve recoverable findings before finalization; surface only irreducible final risks
+- [ ] **P5.5** Allow Auto Fire only for completed runs that pass deterministic finalization gates
+- [ ] **P5.6** Add visual disable toggle and browser performance logging for audio-critical performance
+- [ ] **P5.7** Panic flow: confirm dialog → stop audio → clear visuals → optional REPL reload
+- [ ] **P5.8** Extend capability tests with "only change drums", "increase energy 10%", and conflicting-constraint scenarios
+- [ ] **P5.9** Write automated tests for Agent Run, client state, validation tools, and finalization invariants
 
 ---
 
@@ -117,5 +134,7 @@
 
 - Phase 2 depends on Phase 1 (no Pydantic models or client state machine without the shell)
 - Phase 3 depends on Phase 2 (needs state model, config, and recovery behavior)
-- Phase 4 depends on Phase 3 (needs staging flow before tuning prompt)
-- Phase 5 depends on Phase 4 (needs agent producing real output before hardening)
+- Phase 4 depends on Phase 3 (the runtime needs a safe final staging boundary)
+- Phase 4D depends on the resumable run contract from Phase 4C
+- Phase 4E–4G depend on Agent Run state and tool execution from Phase 4C
+- Phase 5 depends on Phase 4C (validation is an agent tool/finalization concern, not a separate user review flow)

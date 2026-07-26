@@ -9,10 +9,11 @@
 | Frontend | Vanilla TS + `@strudel/repl@1.3.0` web component | Thin adapter over the REPL, no UI framework dependency |
 | Backend | Python 3.12 + FastAPI | Better long-term fit for users, auth, database, background jobs, deployment, and model/API integrations |
 | Backend validation | Pydantic | API schemas, config validation, and provider response validation |
-| Transport | SSE (server→client) + HTTP POST (client→server, agent staging) | Already validated in POC; no WebSocket complexity needed yet |
+| Transport | SSE (server→client) + HTTP POST (client→server) | Run status and track updates are server-driven; user intents, clarification answers, and controls are commands |
 | Diff render | CodeMirror merge extension or hand-rolled inline diff | CodeMirror is already in the REPL; reuse its extension ecosystem |
 | API contracts | FastAPI OpenAPI schema + generated or hand-maintained TS types | Backend owns validation; frontend consumes stable HTTP contracts |
-| Agent providers | Provider adapter layer over direct model APIs | Avoid tying the product to one vendor SDK or hosted agent platform |
+| Agent runtime | Python Agent Run state machine + tool registry | The product owns iteration, tools, budgets, pause/resume, and finalization |
+| Agent providers | Model-turn adapters over direct APIs | Normalize messages and tool calls without tying the runtime to one vendor |
 | Config | `project.config.json` (JSON, loaded by backend at startup) | Human-writable, no env-var sprawl |
 
 ## 2. Delivery Model
@@ -47,10 +48,14 @@ Use explicit `project_id` and `session_id` fields in API/state models where usef
 ┌───────────────────────┼─────────────────────────┐
 │  Server               │                          │
 │  ┌──────────┐  ┌──────┴─────┐  ┌──────────────┐ │
-│  │ Files    │  │ Agent      │  │ Snapshots    │ │
-│  │ (track   │  │ Service    │  │ / History    │ │
-│  │  I/O)    │  │ / Engine   │  │              │ │
-│  └──────────┘  └────────────┘  └──────────────┘ │
+│  │ Files    │  │ Agent Run  │  │ Snapshots    │ │
+│  │ (track   │  │ Runtime    │  │ / History    │ │
+│  │  I/O)    │  └─────┬──────┘  │              │ │
+│  └──────────┘        │         └──────────────┘ │
+│                 ┌────┴─────┐  ┌──────────────┐  │
+│                 │ Tool     │  │ Model-turn   │  │
+│                 │ Registry │  │ Providers    │  │
+│                 └──────────┘  └──────────────┘  │
 │                                                  │
 │  ┌──────────────────────────────────────────────┐│
 │  │  HTTP + SSE endpoints                        ││
@@ -102,19 +107,44 @@ changeSet        — metadata for latest agent-staged change
 |---|---|---|---|---|---|
 | **Manual evaluate (success)** | ← editorCode | (unchanged) | ← editorCode | (unchanged) | (cleared) |
 | **Manual evaluate (failure)** | (unchanged) | (unchanged) | (unchanged) | (unchanged) | (unchanged) |
-| **Agent stage** | (unchanged) | ← agent output | (unchanged) | ← previous editorCode | ← agent metadata |
+| **Completed Agent Run stages** | (unchanged) | ← final agent output | (unchanged) | ← previous editorCode | ← final agent metadata |
 | **Agent undo** | (unchanged) | ← preAgentCode | (unchanged) | (cleared) | (cleared) |
 | **Manual edit** | (unchanged) | ← user input | (unchanged) | (unchanged) | (unchanged) |
 | **Revert to lastGood** | ← lastGoodCode | ← lastGoodCode | (unchanged) | (cleared) | (cleared) |
 
 ### 5.3 Evaluation Rules
 
-1. `Manual Fire` (default): agent stages into editor, user presses Ctrl+Enter to evaluate.
-2. `Auto Fire` (opt-in): agent stages into editor AND evaluates immediately after successful validation.
+1. `Manual Fire` (default): a completed run stages into the editor, then the user presses Ctrl+Enter to evaluate.
+2. `Auto Fire` (opt-in): a completed run stages and evaluates only after deterministic finalization gates pass.
 3. Failed evaluation MUST NOT overwrite `lastGoodCode`.
 4. Failed evaluation MUST NOT stop the currently running scheduler.
 5. `Stop` halts playback and disables Auto Fire.
 6. `Panic` stops playback, clears visuals, and presents a confirm dialog before optionally reloading the REPL iframe.
+
+### 5.4 Agent Run State
+
+Agent work-in-progress is separate from editor and performance state:
+
+```text
+runId             — identifier for one user intent and its internal work
+runStatus         — running | needs_input | completed | failed | cancelled
+baseCode/hash     — editor version the run currently reasons against
+turns             — normalized model messages and tool results needed to continue
+budgets           — turn, elapsed-time, token, and cancellation limits
+finalChange       — present only after successful finalization
+pendingQuestion   — present only while needs_input
+```
+
+Candidate code, validation findings, and recoverable tool errors remain inside
+the run. They do not update `editorCode`, create a `changeSet`, or enter change
+history. A completed run crosses the staging boundary exactly once: its final
+change is compared with the latest editor version, staged, and then handled by
+Manual Fire or Auto Fire.
+
+`needs_input` is not a failed validation state. The agent may use it only when
+the user's intent is materially ambiguous, constraints conflict, or a creative
+decision cannot be made responsibly without the user. Answering resumes the
+same run with the latest editor version.
 
 ## 6. Agent API Contract
 
@@ -139,138 +169,162 @@ Rationale:
 
 ### 6.3 Provider Strategy
 
-The product should call model APIs through a narrow provider adapter instead of binding the core workflow to a platform-specific agent SDK.
+The product calls model APIs through narrow model-turn adapters instead of
+binding the workflow to a platform-specific agent SDK.
 
 Rationale:
 - We need to support multiple model and API vendors over time.
-- The app owns staging, diffing, validation, fire control, snapshots, and recovery.
-- Hosted or SDK-specific agent loops can be evaluated inside individual adapters later, but their concepts should not leak into the product state model.
-- Direct API calls keep the first implementation easier to reason about and deploy.
-
-Provider adapters expose one asynchronous operation. Execution policy such as
-`apply_mode` stays outside this contract because Manual/Auto Fire is controlled by
-the application after generation.
+- The app owns the Agent Run, tool execution, budgets, pause/resume,
+  finalization, staging, fire control, snapshots, and recovery.
+- Providers map normalized messages and tool definitions to vendor APIs, then
+  normalize assistant output and tool calls back to the runtime.
+- A provider must not decide when an internal candidate is final or stage code
+  directly into the editor.
+- Vendor SDK agent loops may be evaluated inside adapters later, but only if
+  they preserve the same run/tool/finalization contract.
 
 ```python
 @dataclass(frozen=True)
-class ProviderRequest:
-    intent: str
-    current_code: str
-    reconciliation: ReconciliationContext | None
+class ModelTurnRequest:
+    messages: list[AgentMessage]
+    tools: list[ToolDefinition]
+    model: str
+    remaining_token_budget: int
 
 class AgentProvider(Protocol):
-    async def create_change(self, request: ProviderRequest) -> GeneratedChange:
+    async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         ...
 ```
 
-`AgentService` selects the configured provider, maps `ChangeRequest` into this
-contract, and validates that the provider returned non-empty code and explanation.
-`changes.py` persists only validated generated changes.
+`ModelTurnResult` contains normalized assistant content, tool calls, usage, and
+provider metadata. The runtime, not the adapter, decides whether to execute a
+tool, continue the loop, pause for user input, fail, or accept a finalized
+change.
 
-### 6.3.1 Prompt Contract
+The current `create_change()` adapters are a transitional one-shot
+implementation. They remain usable while P4C introduces `next_turn()` and moves
+generation control into the runtime.
+
+Current providers remain direct API integrations:
+
+- OpenAI uses the Responses API and `gpt-5.6-terra` by default.
+- DeepSeek uses Chat Completions and `deepseek-v4-pro` as the checked-in
+  project default.
+- Mock remains deterministic for runtime and UI tests.
+
+Each adapter will normalize its vendor's native tool-call representation into
+the shared model-turn contract. Provider settings and browser-supplied API-key
+handling remain unchanged.
+
+### 6.4 Agent Instructions And Tools
 
 `backend/app/prompt_contract.py` owns the vendor-neutral system prompt, JSON
-input builder, and strict response schema. Every real provider must return:
+input conventions, and final-change schema. As the runtime becomes tool-driven,
+the prompt instructs the model to pursue the user's intent, use available tools
+to inspect and validate its work, revise recoverable problems internally, and
+finish only when it judges the result ready.
 
-- complete replacement `code`;
-- concise `explanation`;
-- explicit `action` of `apply` or `noop`;
-- a `warnings` array using the shared warning schema.
+Initial runtime tools:
 
-The contract requires `noop` to return the current code unchanged, preserve
-unrequested music and visuals, and treat code plus natural-language intent as
-data rather than prompt instructions. Reconciliation context uses the same
-input contract, so the rules remain identical across the initial and follow-up
-generation turns. Provider modules only map this contract to their API format.
+- `inspect_diff(base_code, candidate_code)`: return a deterministic diff for
+  the agent's self-review.
+- `validate_candidate(candidate_code)`: run available non-performing syntax,
+  mini-notation, sample, structural, and safety checks.
+- `finalize_change(code, explanation, warnings)`: request completion. The
+  runtime applies deterministic finalization gates before accepting it.
+- `request_user_input(question, options, reason)`: pause only for material
+  ambiguity, conflicting constraints, or a key user decision.
 
-Initial provider examples:
+Tool results are observations for the agent, not user-facing workflow states.
+If `inspect_diff` shows that a candidate changed bass despite "only change
+drums," the agent is expected to revise and check again. It must not finalize
+that intermediate result and ask the user to adjudicate the agent's own error.
 
-- `OpenAIProvider`: direct Responses API call with strict JSON Schema output.
-- `DeepSeekProvider`: OpenAI-compatible Chat Completions with JSON Output and application-side schema validation.
-- `AnthropicProvider`: future direct Anthropic API adapter.
-- `MockProvider`: deterministic local provider for tests and UI development.
+The runtime controls budgets and safety boundaries, but it does not hardcode a
+domain-specific sequence such as "generate, then check drums, then regenerate."
+The model chooses its tool calls and revision strategy. Configurable turn,
+elapsed-time, token, and cancellation budgets prevent runaway loops. Exhausting
+a budget ends the run as `failed`; no internal candidate is staged.
 
-OpenAI uses `gpt-5.6-terra` as its built-in
-balance of capability, latency, and cost, while allowing browser or backend
-configuration to override the model. Requests use low reasoning effort, a
-45-second timeout, `store: false`, and a Pydantic-generated strict schema. See
-the official [latest model guide](https://developers.openai.com/api/docs/guides/latest-model.md)
-and [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+### 6.5 Agent Run Lifecycle
 
-The checked-in project default is DeepSeek `deepseek-v4-pro`. Its adapter uses
-the official Chat Completions endpoint, disables thinking for lower live-coding
-latency, requests JSON Output, and validates the result with Pydantic. DeepSeek
-JSON Output does not guarantee schema adherence and may occasionally return empty
-content, so either case is surfaced as a provider error without persisting a
-change. See the official [DeepSeek quick start](https://api-docs.deepseek.com/zh-cn/)
-and [JSON Output guide](https://api-docs.deepseek.com/zh-cn/guides/json_mode/).
-
-### 6.4 POST /changes — Request
-
-```python
-# POST /changes
-class ChangeRequest(BaseModel):
-    # User's natural language intent
-    intent: str
-
-    # Current context
-    current_code: str              # editorCode at time of request
-    apply_mode: Literal["manual", "auto"]
-    reconciliation: ReconciliationContext | None = None
+```text
+user intent + current editor version
+                │
+                ▼
+             running
+                │
+      model turn / tool call loop
+       ┌────────┼──────────────┐
+       │        │              │
+ recoverable   material      finalized
+ finding       ambiguity      candidate
+       │        │              │
+       │        ▼              ▼
+       │   needs_input    finalization gates
+       │        │          ├─ fail → tool result → running
+       │   user answer     └─ pass → completed
+       │        │                         │
+       └────────┴────────► running        ▼
+                                   stage final change
 ```
 
-When the editor changes while the provider is generating, the browser captures
-the original base code and hash. It waits briefly for typing to settle, then
-automatically submits a bounded reconciliation request containing the original
-base, the previous agent result, the latest editor code, and a line diff of the
-user's edits. The provider returns either `apply` with reconciled full-file code
-or `noop` when the latest user code already satisfies the original intent. The
-browser verifies the latest hash again before staging a response; it makes at
-most two reconciliation attempts and never overwrites a newer edit. A reconciled
-result is staged for review even when Auto Fire was enabled.
+Only public boundary states cross into the user-facing workflow:
 
-### 6.5 POST /changes — Response
+- `completed`: stage the final change and show its final explanation/diff.
+- `needs_input`: show one concise clarification or decision request, then
+  resume the same run after the answer.
+- `failed`: explain that the run could not complete; keep editor and playback
+  unchanged.
+- `cancelled`: keep editor and playback unchanged.
 
-```python
-class ChangeResponse(BaseModel):
-    # The new full code
-    code: str
+Normal candidate failures, scope violations, tool errors that can be repaired,
+and self-review notes remain internal. Hidden model reasoning is neither
+requested nor persisted.
 
-    # Musical explanation (human-readable, shown in the UI)
-    explanation: str
+### 6.6 Agent Run API
 
-    # "noop" must return current_code unchanged
-    action: Literal["apply", "noop"] = "apply"
-
-    # Structured warnings; required, use [] when none apply
-    warnings: list[ChangeWarning]
-
-    # Changed ranges (for diff highlighting; optional but recommended)
-    ranges: list[ChangedRange] | None = None
-
-class ChangedRange(BaseModel):
-    from_: int = Field(alias="from")
-    to: int
-    description: str
-
-class ChangeWarning(BaseModel):
-    level: Literal["info", "warn", "risk"]
-    message: str
-    category: Literal["sample", "visual", "structure", "performance", "mini-notation"]
+```text
+POST /agent/runs                 Start a run from user intent + editor version
+GET  /agent/runs/:id             Read public run status
+POST /agent/runs/:id/input       Answer a needs_input question
+POST /agent/runs/:id/editor      Supply a newer editor version to the run
+POST /agent/runs/:id/cancel      Cancel the run
+GET  /events                     Stream public run status and final results
 ```
 
-Persisted change records also include `provider`, `model`, and `latencyMs` for
-diagnostics and later evaluation. Credentials are never included.
+```python
+class AgentRunPublic(BaseModel):
+    id: str
+    status: Literal["running", "needs_input", "completed", "failed", "cancelled"]
+    question: AgentQuestion | None = None
+    change: ChangeRecord | None = None
+    error: str | None = None
+```
 
-### 6.6 Auto Fire Validation
+The public representation excludes internal candidates, recoverable findings,
+raw provider messages, and hidden reasoning. Run audit records may retain user
+messages, tool names, tool outcomes, usage, final result, and provider metadata,
+but never credentials or hidden chain-of-thought.
 
-Before auto-evaluating in `Auto Fire` mode, the server validates:
-1. Code is non-empty.
-2. Mini-notation strings use double quotes or backticks (not single quotes).
-3. Known sample names check (from sample registry).
-4. No `eval()`, `Function()`, or other dangerous constructs.
+Concurrent editing becomes a run-context update. Before final staging, the
+browser and runtime compare editor hashes. A newer editor version is supplied to
+the active run, which reconciles and self-reviews again. The current fixed
+two-request client reconciliation remains only until this run API replaces it.
 
-If validation fails with warnings at `risk` level, the change is staged but NOT auto-evaluated — the user is prompted.
+### 6.7 Finalization And Fire Safety
+
+`finalize_change` is a request from the agent, not an unconditional commit.
+Deterministic gates reject empty code, unsafe dynamic execution, invalid syntax
+where tooling is available, and stale editor versions. Rejections become tool
+results and return control to the agent while budgets remain.
+
+Final warnings are reserved for irreducible limitations or risks that the agent
+cannot verify or remove. They are not a channel for exposing intermediate scope
+violations. A run with unresolved blocking risk cannot complete or Auto Fire.
+Manual Fire remains the default; Auto Fire is allowed only after a completed run
+passes all deterministic gates and has not been invalidated by concurrent user
+editing.
 
 ## 7. Module Responsibilities
 
@@ -282,25 +336,27 @@ If validation fails with warnings at `risk` level, the change is staged but NOT 
 | `backend/app/models.py` | Pydantic request/response/project/session state models |
 | `backend/app/tracks.py` | Track file I/O (read from `tracks/`, write to `tracks/`) |
 | `backend/app/snapshots.py` | Snapshot CRUD, pruning (keep last 50 or 24h) |
-| `backend/app/changes.py` | `POST /changes`, `GET /changes/latest`, `POST /changes/:id/undo` |
-| `backend/app/agent.py` | Prompt construction, provider selection, response parsing, validation |
-| `backend/app/prompt_contract.py` | Shared agent instructions, JSON request construction, and strict provider response schema |
-| `backend/app/providers/` | Vendor-specific direct API adapters behind a stable provider interface |
-| `backend/app/samples.py` | Sample registry (list known sample names from `samples/` config) |
+| `backend/app/changes.py` | Persist, list, and undo completed final changes only |
+| `backend/app/agent_runtime.py` | Agent Run lifecycle, budgets, model turns, pause/resume, and finalization |
+| `backend/app/agent_runs.py` | Run state storage and public run projections |
+| `backend/app/prompt_contract.py` | Shared agent instructions and final-change schema |
+| `backend/app/tools/` | Tool registry and deterministic tool implementations |
+| `backend/app/providers/` | Vendor-specific model-turn and tool-call adapters |
+| `backend/app/samples.py` | Sample registry used by internal validation tools |
 | `backend/app/config.py` | Load and watch `project.config.json` |
 
 ### 7.2 Client Modules
 
 | Module | Responsibility |
 |---|---|
-| `client/repl.ts` | `strudel-editor` adapter (see §3) |
-| `client/agent.ts` | Agent panel, prompt input, mode toggle (Manual/Auto Fire) |
+| `client/repl.ts` | `strudel-editor` adapter (see §4) |
+| `client/agent.ts` | Intent, public run status, clarification, and Manual/Auto Fire UI |
 | `client/diff.ts` | Diff computation and inline/side-by-side rendering |
-| `client/state.ts` | Client-side state machine (§4), transition guards |
+| `client/state.ts` | Client-side state machine (§5), transition guards |
 | `client/recovery.ts` | Revert to `lastGoodCode`, error display, panic handler |
-| `client/status.ts` | Status bar: connection status, last evaluate time, warnings |
+| `client/status.ts` | Connection, public run status, evaluation status, errors, and final warnings |
 | `client/settings.ts` | Browser-local provider/model settings and API-key storage policy |
-| `client/bridge.ts` | SSE listener, HTTP helpers, reconnect logic |
+| `client/bridge.ts` | SSE listener, run commands, HTTP helpers, reconnect logic |
 | `client/main.ts` | App bootstrap, glue |
 
 ## 8. API Endpoints
@@ -311,7 +367,11 @@ POST /track                      Save editor code to disk (from evaluate)
 GET  /state                      Current local project/session runtime state
 GET  /agent/settings             Provider defaults and installed provider capabilities
 POST /agent/providers/test       Test transient browser-supplied provider settings
-POST /changes                    Stage an agent change
+POST /agent/runs                 Start an Agent Run
+GET  /agent/runs/:id             Read public run status
+POST /agent/runs/:id/input       Answer a clarification
+POST /agent/runs/:id/editor      Supply a newer editor version
+POST /agent/runs/:id/cancel      Cancel a run
 GET  /changes/latest             Get latest staged change metadata
 POST /changes/:id/undo           Undo a staged change (restore preAgentCode)
 GET  /snapshots                  List snapshots
@@ -329,7 +389,8 @@ GET  /samples                    List known samples
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py
-│   │   ├── agent.py
+│   │   ├── agent_runtime.py
+│   │   ├── agent_runs.py
 │   │   ├── prompt_contract.py
 │   │   ├── changes.py
 │   │   ├── tracks.py
@@ -337,11 +398,17 @@ GET  /samples                    List known samples
 │   │   ├── samples.py
 │   │   ├── config.py
 │   │   ├── models.py
+│   │   ├── tools/
+│   │   │   ├── __init__.py
+│   │   │   ├── diff.py
+│   │   │   ├── validation.py
+│   │   │   └── finalization.py
 │   │   └── providers/
 │   │       ├── __init__.py
 │   │       ├── base.py
+│   │       ├── http.py
 │   │       ├── openai.py
-│   │       ├── anthropic.py
+│   │       ├── deepseek.py
 │   │       └── mock.py
 │   └── tests/
 ├── src/
@@ -385,7 +452,12 @@ GET  /samples                    List known samples
   "agent": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
-    "contextFile": "agent-context.md"
+    "contextFile": "agent-context.md",
+    "runtime": {
+      "maxTurns": 8,
+      "maxElapsedSeconds": 90,
+      "maxTotalTokens": 50000
+    }
   },
   "samples": {
     "registryPath": "samples/"
@@ -403,7 +475,12 @@ sent to the backend for the duration of an individual request; the backend must
 not persist or return them. A hosted deployment may use platform credentials when
 the browser does not supply a user key.
 
-## 10. agent-context.md Format
+Runtime limits are operational guardrails, not a hardcoded task plan. The agent
+still chooses which tools to call and when to revise; the limits only prevent
+unbounded cost and latency. Values are initial defaults and should be tuned with
+evaluation data.
+
+## 11. agent-context.md Format
 
 A user-editable markdown file injected into the agent's system prompt. Expected sections:
 
@@ -428,17 +505,19 @@ A user-editable markdown file injected into the agent's system prompt. Expected 
 (things the agent should never change, sample name conventions)
 ```
 
-## 11. Testing Strategy
+## 12. Testing Strategy
 
 ### Automated
 
 | Target | What to test |
 |---|---|
-| Client state transitions (Vitest) | Each transition in §4.2; verify state invariants hold |
+| Client state transitions (Vitest) | Each transition in §5.2; verify state invariants hold |
 | REPL adapter unit boundaries (Vitest) | Adapter behavior around `setCode`, dirty state, and event callbacks |
-| Agent response validation (pytest) | Validate `ChangeResponse` schema; ensure warnings are classified correctly |
-| Provider adapters (pytest) | Verify provider input/output mapping with mocked API responses |
-| Mini-notation preflight (pytest) | Detect single-quoted pattern strings; flag unknown samples |
+| Agent Run transitions (pytest) | running/needs_input/completed/failed/cancelled, resume, cancellation, and budget exhaustion |
+| Finalization invariants (pytest) | Only completed final changes reach editor/history; stale and invalid candidates return to the loop |
+| Tool registry (pytest) | Validate arguments/results, tool failures, diff inspection, and non-performing candidate checks |
+| Provider adapters (pytest) | Verify normalized messages, tool definitions, tool calls, usage, and API error mapping |
+| Public run projection (pytest) | Ensure candidates, recoverable findings, credentials, and hidden reasoning are never exposed |
 | Snapshot pruning (pytest) | Verify maxCount and maxAgeHours are respected |
 | Config loading (pytest) | Parse valid config, reject invalid, apply defaults |
 
@@ -449,16 +528,21 @@ A user-editable markdown file injected into the agent's system prompt. Expected 
 | REPL adapter | Verify setCode/getCode/evaluate/stop work through the actual `@strudel/repl` web component |
 | Failed evaluate safety | Confirm a syntax error does not stop the running scheduler (targeted test from open question) |
 | Visual feedback UX | Verify `punchcard`, `spiral`, `pianoroll`, `scope` render correctly and don't block audio |
-| Auto Fire validation | Confirm `risk`-level warnings block auto-evaluate |
+| Agent self-correction | Confirm recoverable validation failures cause another internal turn, not a staged/user-facing candidate |
+| Clarification flow | Confirm only a question is shown, the same run resumes, and no candidate reaches the editor |
+| Auto Fire validation | Confirm only completed, current, deterministic-gate-passing results can auto-evaluate |
 | Panic flow | Confirm panic stops audio, clears visuals, confirms before reload |
 
-## 12. Current Technical Decisions
+## 13. Current Target Decisions
 
 Current implementation decisions:
 
-1. **Agent code model**: Agent operates directly on Strudel JS (see §5.1).
-2. **Change format**: Full-file replacement with client-side diff (see §5.2).
-3. **Agent provider model**: The backend uses direct API provider adapters rather than binding the product workflow to a vendor-specific agent SDK.
-4. **Visual layer agent access**: Agent can add/remove/modify visual functions (`punchcard`, `spiral`, etc.) but each visual change generates a `visual` category warning. In `Auto Fire` mode, `risk`-level visual warnings block auto-evaluate.
-5. **Browser autosave**: Only on evaluate, not on debounce. The `dirty` flag is informational only; no silent disk writes.
-6. **File sync model**: After Phase 2, the SSE file-watch only broadcasts disk changes that originate from outside the browser (e.g., external editor). Agent staging writes directly to the editor via the client bridge, not via file-watch. The `POST /track` endpoint writes editor code to disk on evaluate, which completes the loop.
+1. **Agent code model**: Agent operates directly on Strudel JS (see §6.1).
+2. **Change format**: Full-file replacement with client-side diff (see §6.2).
+3. **Agent runtime ownership**: The backend owns a vendor-neutral Agent Run and tool loop; providers implement model turns, not the product workflow.
+4. **Internal correction**: Candidate code, recoverable validation failures, and self-review remain internal until the agent produces a finalized result.
+5. **Human-in-the-loop boundary**: User input is requested only for material ambiguity, conflicting constraints, or key creative decisions—not to repair the agent's intermediate mistakes.
+6. **Final warning policy**: User-visible warnings are limited to irreducible final risks or unverifiable limitations. Recoverable findings must be handled inside the run.
+7. **Bounded autonomy**: The model chooses tools and revisions, while configurable turn/time/token budgets prevent unbounded loops.
+8. **Browser autosave**: Only on evaluate, not on debounce. The `dirty` flag is informational only; no silent disk writes.
+9. **File sync model**: External file changes are broadcast through SSE. Agent candidates never enter the editor; only a completed final change stages into the editor, and `POST /track` writes visible code to disk on evaluate.

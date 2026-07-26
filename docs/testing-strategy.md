@@ -2,12 +2,12 @@
 
 ## 1. Overview
 
-Strudel Agent has three layers that require different testing approaches:
+Strudel Agent requires several complementary testing layers:
 
 | Layer | Tool | Scope | Confidence |
 |---|---|---|---|
 | Unit (frontend) | Vitest | State machine, preflight guards, pure functions | High |
-| Unit (backend) | pytest | Pydantic models, snapshots, track I/O | High |
+| Unit (backend) | pytest | Models, Agent Run transitions, tools, providers, snapshots, track I/O | High |
 | Integration (backend) | pytest + httpx TestClient | FastAPI endpoints, SSE | High |
 | E2E (mock REPL) | Playwright | Core product flows with a mocked `strudel-editor` API | High |
 | Real REPL smoke | Playwright | Minimal checks against the real Strudel REPL | Medium |
@@ -18,6 +18,11 @@ Strudel Agent has three layers that require different testing approaches:
 Test what can be mechanically verified. Reserve human effort for what can't.
 
 Automated tests live alongside code. Mock-REPL E2E tests verify product behavior. Real-REPL E2E tests stay thin and only verify integration smoke. No layer is skipped, no layer is over-invested.
+
+Agent tests must enforce the product boundary: internal candidates, recoverable
+validation findings, provider messages, and hidden reasoning never reach the
+editor or public run response. Tests should observe state transitions and tool
+results, not assert a model's private reasoning.
 
 ---
 
@@ -77,6 +82,11 @@ Automated tests live alongside code. Mock-REPL E2E tests verify product behavior
 | Module | What to test |
 |---|---|
 | `backend/app/models.py` | Pydantic `alias` serialization (camelCase ↔ snake_case), default values, validation |
+| `backend/app/agent_runtime.py` | Run transitions, tool loop, budgets, cancellation, pause/resume, finalization |
+| `backend/app/agent_runs.py` | Public projection, resumable state, candidate isolation |
+| `backend/app/prompt_contract.py` | Shared instructions and final-change schema |
+| `backend/app/tools/` | Tool argument validation, deterministic results, recoverable/fatal errors |
+| `backend/app/providers/` | Normalized model turns, tool calls, usage, and vendor error mapping |
 | `backend/app/tracks.py` | `read_track` / `write_track` round-trip, missing file behavior |
 | `backend/app/snapshots.py` | CRUD, list ordering, prune by count, prune by age |
 
@@ -97,6 +107,19 @@ Automated tests live alongside code. Mock-REPL E2E tests verify product behavior
 | 3 | `read_snapshot(nonexistent_id)` | Returns `None` |
 | 4 | Create `MAX_SNAPSHOTS + 10`, then `list_snapshots()` | Count capped at `MAX_SNAPSHOTS` |
 | 5 | Create old snapshot, advance clock past `MAX_AGE`, `prune()` | Old snapshot removed |
+
+### 3.5 Core test cases — Agent Run
+
+| # | Scenario | Expected |
+|---|---|---|
+| 1 | Model calls `inspect_diff`, then `validate_candidate`, then `finalize_change` | Tools execute in order chosen by the model; completed final change is returned once |
+| 2 | Candidate validation returns a recoverable error | Tool result is appended and another model turn runs; no editor/history change |
+| 3 | Model calls `request_user_input` | Run becomes `needs_input`; only the question/options are public |
+| 4 | User answers a paused run | Same run resumes with the answer and latest editor version |
+| 5 | Editor hash changes before finalization | Stale result is rejected into the loop; editor remains untouched |
+| 6 | Turn/time/token budget is exhausted | Run becomes `failed`; no candidate is staged |
+| 7 | User cancels during model or tool work | Run becomes `cancelled`; editor/playback/history remain unchanged |
+| 8 | Provider/tool returns malformed data | Runtime records a sanitized failure or recoverable tool result without leaking credentials |
 
 ---
 
@@ -119,6 +142,11 @@ Automated tests live alongside code. Mock-REPL E2E tests verify product behavior
 | `GET /snapshots` | Returns sorted list | Empty when no snapshots |
 | `POST /snapshots` | Creates snapshot, returns record | 400 on empty code |
 | `POST /snapshots/:id/revert` | Reverts track and returns snapshot | 404 on unknown id |
+| `POST /agent/runs` | Starts a run and returns public status | 400 on empty intent/code; provider config errors are sanitized |
+| `GET /agent/runs/:id` | Returns public run projection | 404 on unknown id; excludes candidates/provider internals |
+| `POST /agent/runs/:id/input` | Resumes a `needs_input` run | 409 unless run is waiting for input |
+| `POST /agent/runs/:id/editor` | Supplies latest editor version | Rejects invalid/stale sequencing safely |
+| `POST /agent/runs/:id/cancel` | Cancels without staging | Idempotent terminal behavior |
 | `GET /events` | Initial `track` event format | Queue cleanup and reconnect behavior covered by E2E/manual smoke |
 
 ### 4.3 Shared fixture
@@ -180,6 +208,12 @@ It should also dispatch the same `update` event expected by the app.
 | 6 | Single-quoted pattern → Evaluate | Warning shown; snapshot still created after successful mock `evaluate()` |
 | 7 | Same-code SSE echo after Evaluate | Status remains "Playing" instead of being overwritten by "Loaded" |
 | 8 | Panic button | Mock `stop()` called; status shows panic message |
+| 9 | Agent internally rejects and revises a candidate | Editor and diff stay unchanged until completed final result arrives |
+| 10 | Agent needs clarification | Only the question/options appear; answer resumes the same run |
+| 11 | User edits while run is active | Latest editor version reaches the run; stale candidate never overwrites it |
+| 12 | Run fails, exhausts budget, or is cancelled | Editor, playback, snapshot, and change history remain unchanged |
+| 13 | Completed Manual Fire run | One final change is staged with final diff/explanation; no evaluate call |
+| 14 | Completed Auto Fire run passes gates | Final change evaluates once; failed gates return to the agent or block completion |
 
 ### 5.4 Real REPL smoke tests
 
@@ -217,6 +251,11 @@ strudel/
 │       ├── __init__.py
 │       ├── conftest.py              # Shared fixtures
 │       ├── test_models.py
+│       ├── test_agent_runtime.py
+│       ├── test_agent_runs.py
+│       ├── test_tools.py
+│       ├── test_providers.py
+│       ├── test_prompt_contract.py
 │       ├── test_tracks.py
 │       ├── test_snapshots.py
 │       └── test_api.py
@@ -319,4 +358,5 @@ export default defineConfig({
 | Visual rendering (scope, pianoroll, spiral) | Canvas/WebGL state opaque to tests | Per Strudel version bump |
 | Scheduler resilience (failed evaluate doesn't stop playback) | Requires human auditory perception | Targeted test per T2.8 |
 | Frame rate / performance | Needs profiler + visual judgment | Phase 5 instrumentation |
+| Musical quality and taste | Deterministic assertions cannot judge groove or mood | Fixed scenario review during agent evaluation/tuning |
 | Cross-browser compatibility | Strudel targets Chromium-family | N/A — not a goal |

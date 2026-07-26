@@ -21,6 +21,8 @@ The first formal version should therefore preserve the official Strudel REPL as 
 - Performance-safe by default: generated changes should not unexpectedly disrupt a live set.
 - Reversible at every step: the user should be able to recover the last good musical state quickly.
 - Transparent when needed: the agent should expose what it changed, why it changed it, and what musical effect it expects.
+- Agent-owned quality: the agent should inspect and repair recoverable problems internally instead of delegating its intermediate mistakes to the user.
+- Purposeful human input: pause for the user only when intent is materially ambiguous, constraints conflict, or a key creative decision belongs to the performer.
 - Progressive disclosure: beginners can stay in natural language and high-level controls; experienced Strudel users can work directly in the editor.
 - Local-first for performance: the live runtime should not depend on network availability once required packages and samples are available.
 
@@ -68,14 +70,17 @@ The early product does not expose these as separate scope, intensity, timing, or
 protection fields. They remain part of the freeform request until usage shows that
 a stable structured control would improve the interaction.
 
-The agent should explain proposed changes in musical terms, not only code terms. For example, it should say that it tightened the bass rhythm, brightened the hats, or moved a pad out of the low-frequency range.
+The agent should explain its final changes in musical terms, not only code
+terms. Internal candidates, self-review, recoverable validation failures, and
+revision attempts are agent working state and should not become user-facing
+review tasks.
 
 ### Agent Apply Mode
 
 The product should expose only two agent apply modes:
 
-- `Manual Fire`: the agent stages changes directly into the editor, shows a diff or change summary, and waits. The user decides when to evaluate with `Ctrl+Enter` or `Evaluate`. This is the default mode.
-- `Auto Fire`: the agent stages and evaluates changes automatically after validation. This is opt-in and intended for exploration, rehearsal, or low-risk situations.
+- `Manual Fire`: the agent stages a completed final change directly into the editor, shows a diff or change summary, and waits. The user decides when to evaluate with `Ctrl+Enter` or `Evaluate`. This is the default mode.
+- `Auto Fire`: the agent stages and evaluates a completed final change automatically after deterministic finalization gates pass. This is opt-in and intended for exploration, rehearsal, or low-risk situations.
 
 `Manual Fire` deliberately has no separate "accept" step. The agent's response becomes an editable staged change in the REPL immediately, but it does not affect the running music until the user fires it. The user can review the diff, undo the staged change, keep editing, or ask the agent to revise.
 
@@ -83,10 +88,17 @@ The product should expose only two agent apply modes:
 
 When the user gives a natural language prompt in `Manual Fire` mode:
 
-1. The agent reads the current track, musical context, and user constraints.
-2. The agent generates a change and stages it directly in the editor.
-3. The app shows a diff from the previous editor contents, a short musical explanation, and any warnings.
-4. The user can fire it, undo it, manually edit it, or ask the agent to revise it.
+1. Start an Agent Run with the current editor version, musical context, and user intent.
+2. The agent generates candidates, uses available tools to inspect diffs and validate them, and revises recoverable problems internally.
+3. If a material ambiguity, constraint conflict, or key creative decision remains, pause the run and ask one concise question. Resume the same run after the answer.
+4. When the agent has a finalized result, stage only that result in the editor.
+5. Show the final diff, musical explanation, and only irreducible risks or unverifiable limitations.
+6. The user can fire it, undo it, manually edit it, or ask the agent for a new revision.
+
+The app does not expose ordinary intermediate candidates or ask the user to
+decide whether the agent violated its own interpretation of the request. For
+example, if "only change drums" produces a candidate that also changes bass,
+the agent should see that in its diff/tool results and continue correcting it.
 
 This separates "stage this edit" from "perform this edit." That distinction is important during live coding because a performer may want the agent to prepare code immediately, adjust a parameter manually, and fire it on a phrase boundary.
 
@@ -105,7 +117,7 @@ When the user presses `Ctrl+Enter` or clicks `Evaluate`:
 
 Errors should be non-destructive.
 
-The app should handle at least:
+The app and agent tools should handle at least:
 
 - JavaScript syntax errors.
 - Strudel mini-notation parse errors.
@@ -115,7 +127,9 @@ The app should handle at least:
 - Runtime audio errors.
 - Server disconnects.
 
-On error:
+Recoverable candidate errors are returned to the Agent Run as tool results so
+the agent can revise. Only terminal runtime/product errors cross the user-facing
+boundary. On a terminal error:
 
 - Show the error in a visible status panel.
 - Keep the editor code intact.
@@ -138,8 +152,10 @@ Browser
 Local server
   ├─ project/session state
   ├─ track file API
-  ├─ agent change API
-  ├─ agent service / change engine
+  ├─ Agent Run API and event stream
+  ├─ Agent Runtime / tool loop
+  ├─ tool registry
+  ├─ model-turn provider adapters
   ├─ snapshot/change history store
   ├─ sample/config registry
   └─ browser event stream
@@ -155,7 +171,7 @@ Workspace
 
 The architecture has three core responsibilities:
 
-- Agent layer: convert user intent into proposed musical changes, explanations, warnings, and diffs.
+- Agent layer: own the model/tool loop, inspect and repair candidates, pause for essential user decisions, and emit one finalized musical change.
 - Runtime layer: keep the official Strudel REPL as the executable music surface for the first formal version.
 - Recovery layer: preserve history, snapshots, staged changes, and the latest safe fallback so live performance remains reversible.
 
@@ -170,32 +186,39 @@ Safety here means live performance safety: preserving the running set, avoiding 
 - `lastGoodCode`: the most recent known safe fallback.
 - `preAgentEditorCode`: the editor contents immediately before the latest agent-staged change, used for diff and undo.
 - `changeSet`: metadata for the latest agent-staged change, including explanation, warnings, and changed ranges.
+- `agentRun`: separate backend working state for model turns, tool results, budgets, optional clarification, and a final result.
 
 This separation supports both product directions:
 
 - In agent-first flows, generated work can appear immediately in the editor without becoming active.
 - In manual live coding flows, the user can directly edit and evaluate without waiting for the agent.
 - In `Manual Fire`, generated changes can be staged without disrupting the running set.
+- Internal Agent Run candidates do not become `editorCode` or `changeSet`.
 
 Sync rules:
 
 - The visible editor is the source of truth while a browser session is active.
-- Agent-generated changes are staged directly into the editor in `Manual Fire`.
+- Only a completed Agent Run stages code into the editor in `Manual Fire`; internal candidates never do.
 - Staging a change records `preAgentEditorCode` and `changeSet` so the user can inspect or undo it.
-- Browser edits are saved to disk on evaluate and optionally on debounce.
-- If the user has unsaved local editor changes, do not replace them without confirmation.
-- If the agent produces a change while the editor is dirty, create the diff against the current visible editor contents.
+- Browser edits are saved to disk on evaluate.
+- If the editor changes during a run, supply the new version to that run and require another reconciliation/self-review turn.
+- Before staging, compare editor hashes again; stale final results return to the run and never overwrite the editor.
 
 Evaluation rules:
 
 - `Manual Fire` requires human action with `Ctrl+Enter` or `Evaluate`.
-- `Auto Fire` can stage and evaluate changes automatically after validation.
+- `Auto Fire` can stage and evaluate only a completed result that passed deterministic finalization gates.
 - `Stop` stops playback and disarms automatic evaluation.
 - `Panic` should stop playback, clear visuals, and optionally reload the REPL frame.
 - Successful evaluation records a snapshot and updates `lastGoodCode`.
 - Failed evaluation must not overwrite `lastGoodCode`.
 
-The current POC auto-applies file changes into the editor and can auto-evaluate after the page is armed. The formal product should keep the first behavior for `Manual Fire` but not the second: agent changes may stage into the editor automatically, but evaluation should remain a user action unless `Auto Fire` is explicitly enabled.
+The current implementation still uses one-shot provider generation and
+client-side reconciliation. The target Agent Run keeps the same final staging
+behavior while moving candidate generation, validation, reconciliation, and
+revision behind the finalization boundary. Evaluation remains a user action
+unless `Auto Fire` is explicitly enabled and the completed result passes all
+gates.
 
 ## Runtime Choice
 
@@ -238,13 +261,16 @@ Initial formal project layout:
 │  ├─ pyproject.toml
 │  └─ app/
 │     ├─ main.py
-│     ├─ agent.py
+│     ├─ agent_runtime.py
+│     ├─ agent_runs.py
+│     ├─ prompt_contract.py
 │     ├─ changes.py
 │     ├─ tracks.py
 │     ├─ snapshots.py
 │     ├─ samples.py
 │     ├─ config.py
 │     ├─ models.py
+│     ├─ tools/
 │     └─ providers/
 ├─ src/
 │  └─ client/
@@ -307,22 +333,23 @@ The current single-file POC can stay as a reference, but formal development shou
 - Staged changes remain in history for review and recovery.
 - Show musical explanation and warnings for each staged change.
 
-### Phase 4: Agent Integration and Prompt Contract
+### Phase 4: Agent Runtime and Context
 
-- Define a freeform musical intent contract and structured agent response.
-- Let the agent generate staged changes against the current editor contents.
-- When the user edits during generation, automatically reconcile against the latest editor code before staging; never silently fire a reconciled result.
-- Store prompts and staged changes in `changes/`.
-- Add agent context from `agent-context.md`.
-- Add optional project conventions:
-  - `mood`
-  - stems: drums, bass, chords, pad, lead, fx
-  - arrangement markers.
+- Replace one-shot generation with a vendor-neutral model-turn and tool-call contract.
+- Add a bounded Agent Run loop with tool execution, cancellation, finalization, and public run states.
+- Keep candidates and recoverable findings internal; persist and stage only completed final changes.
+- Add `needs_input` pause/resume for material ambiguity, conflicting constraints, and key creative decisions.
+- Feed concurrent editor updates into the active run so the agent reconciles and self-reviews again.
+- Add project context from `agent-context.md`.
+- Add session conversation and revision context without storing credentials or hidden reasoning.
+- Build fixed musical scenarios to tune instructions, tools, and runtime budgets.
 
-### Phase 5: Validation and Performance Hardening
+### Phase 5: Validation Tools and Performance Hardening
 
-- Add warnings for missing known samples.
-- Add warnings for risky sample or visual changes in `Auto Fire`.
+- Add sample, syntax, mini-notation, structural, and visual inspection as internal agent tools.
+- Return recoverable findings to the agent for another turn.
+- Surface only irreducible final risks or unverifiable limitations.
+- Allow `Auto Fire` only after finalization gates pass.
 - Add visual disable toggle.
 - Add browser performance logging for visual draw load.
 - Add commands such as:
@@ -334,10 +361,11 @@ The current single-file POC can stay as a reference, but formal development shou
 ## Open Questions
 
 - Can failed `editor.evaluate()` ever stop the currently running scheduler before throwing? This needs a targeted test.
-- Should staged changes be full-file replacements or structured patches? Full-file is simpler; patches are safer for review.
-- Should the agent operate directly on Strudel JS, or on a higher-level song model that compiles to Strudel?
+- Which Strudel APIs can validate JavaScript and mini-notation without starting audio or visual execution?
+- Should early Agent Run state survive backend restarts on local disk, or only browser reconnects within the current process?
+- Must every provider support native tool calling, or should the runtime offer a structured-JSON tool-call fallback?
+- Which run audit fields are useful for debugging and evaluation without retaining discarded candidate code or hidden reasoning?
 - How much of the visual layer should the agent be allowed to modify during live performance?
-- Should browser edits autosave on debounce, or only on evaluate?
 
 ## Success Criteria
 
@@ -346,6 +374,9 @@ The formal project is viable when:
 - The performer can use the embedded REPL exactly like a normal Strudel live coding surface.
 - The agent can stage changes without interrupting the current performance.
 - The performer can inspect, edit, undo, revise, and fire staged changes.
+- The agent repairs recoverable candidate problems internally and stages only a finalized result.
+- The agent asks the performer only for material clarification or a key decision, then resumes the same run.
+- A cancelled, failed, stale, or budget-exhausted run never changes the editor, playback, snapshots, or change history.
 - A bad agent change does not destroy the active performance state.
 - The last good version is always recoverable.
 - Visuals are useful but never required for audio stability.
