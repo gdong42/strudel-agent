@@ -4,7 +4,7 @@ import time
 
 from .config import load_config
 from .models import AgentResult, ChangeRequest, ProviderInfo
-from .providers.base import AgentProvider, ProviderRequest
+from .providers.base import OneShotAgentProvider, ProviderRequest
 from .providers.deepseek import DEFAULT_DEEPSEEK_MODEL, DeepSeekProvider
 from .providers.mock import MockProvider
 from .providers.openai import DEFAULT_OPENAI_MODEL, OpenAIProvider
@@ -19,7 +19,7 @@ class AgentResponseError(RuntimeError):
 
 
 class AgentService:
-    def __init__(self, provider: AgentProvider, provider_name: str = "unknown", model: str | None = None) -> None:
+    def __init__(self, provider: OneShotAgentProvider, provider_name: str = "unknown", model: str | None = None) -> None:
         self.provider = provider
         self.provider_name = provider_name
         self.model = model

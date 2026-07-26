@@ -298,8 +298,8 @@ class AgentRunPublic(BaseModel):
     id: str
     status: Literal["running", "needs_input", "completed", "failed", "cancelled"]
     question: AgentQuestion | None = None
-    change: ChangeRecord | None = None
-    error: str | None = None
+    final_change: AgentFinalChange | None = None
+    error: AgentRunFailure | None = None
 ```
 
 The public representation excludes internal candidates, recoverable findings,

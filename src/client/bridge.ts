@@ -32,11 +32,45 @@ export interface SnapshotRevertPayload {
 }
 
 export type ApplyMode = 'manual' | 'auto';
+export type AgentRunStatus = 'running' | 'needs_input' | 'completed' | 'failed' | 'cancelled';
 
 export interface ChangeWarning {
   level: 'info' | 'warn' | 'risk';
   message: string;
   category: 'sample' | 'visual' | 'structure' | 'performance' | 'mini-notation';
+}
+
+export interface AgentQuestionOption {
+  id: string;
+  label: string;
+  description: string | null;
+}
+
+export interface AgentQuestion {
+  id: string;
+  question: string;
+  options: AgentQuestionOption[];
+}
+
+export interface AgentFinalChange {
+  code: string;
+  explanation: string;
+  action: 'apply' | 'noop';
+  warnings: ChangeWarning[];
+}
+
+export interface AgentRunFailure {
+  code: 'budget_exhausted' | 'provider_error' | 'tool_error' | 'finalization_failed' | 'internal_error';
+  message: string;
+  retryable: boolean;
+}
+
+export interface AgentRunPublic {
+  id: string;
+  status: AgentRunStatus;
+  question: AgentQuestion | null;
+  finalChange: AgentFinalChange | null;
+  error: AgentRunFailure | null;
 }
 
 export interface ChangeRecord {
