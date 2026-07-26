@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from app.models import ChangeRequest
+from app.models import AgentMessage, ChangeRequest, ModelTurnRequest, ToolCall, ToolDefinition
 from app.providers.base import ProviderError, ProviderRequest
 from app.providers.openai import OpenAIProvider
 
@@ -78,6 +78,108 @@ async def test_openai_provider_includes_reconciliation_context() -> None:
     result = await OpenAIProvider("test-key", transport=httpx.MockTransport(handler)).create_change(request)
 
     assert result.action == "noop"
+
+
+@pytest.mark.anyio
+async def test_openai_provider_normalizes_a_model_turn_and_tool_calls() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert request.url.path == "/v1/responses"
+        assert payload["model"] == "runtime-model"
+        assert payload["store"] is False
+        assert payload["instructions"] == "You are a Strudel agent."
+        assert payload["max_output_tokens"] == 2048
+        assert payload["tools"] == [{
+            "type": "function",
+            "name": "inspect_diff",
+            "description": "Inspect the candidate diff.",
+            "parameters": {"type": "object", "additionalProperties": False},
+            "strict": True,
+        }]
+        assert payload["input"] == [
+            {"role": "user", "content": "Make it groovier."},
+            {"role": "assistant", "content": "I will inspect the candidate."},
+            {
+                "type": "function_call",
+                "call_id": "call-1",
+                "name": "inspect_diff",
+                "arguments": '{"candidate":"first"}',
+            },
+            {"type": "function_call_output", "call_id": "call-1", "output": '{"valid":true}'},
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp-1",
+                "usage": {"input_tokens": 120, "output_tokens": 30},
+                "output": [
+                    {"type": "reasoning", "encrypted_content": "not persisted"},
+                    {"type": "message", "content": [{"type": "output_text", "text": "I will validate it."}]},
+                    {
+                        "type": "function_call",
+                        "call_id": "call-2",
+                        "name": "validate_candidate",
+                        "arguments": '{"candidate":"second"}',
+                    },
+                ],
+            },
+        )
+
+    result = await OpenAIProvider("test-key", transport=httpx.MockTransport(handler)).next_turn(
+        ModelTurnRequest(
+            messages=[
+                AgentMessage(role="system", content="You are a Strudel agent."),
+                AgentMessage(role="user", content="Make it groovier."),
+                AgentMessage(
+                    role="assistant",
+                    content="I will inspect the candidate.",
+                    toolCalls=[ToolCall(id="call-1", name="inspect_diff", arguments={"candidate": "first"})],
+                ),
+                AgentMessage(role="tool", content='{"valid":true}', toolCallId="call-1"),
+            ],
+            tools=[
+                ToolDefinition(
+                    name="inspect_diff",
+                    description="Inspect the candidate diff.",
+                    inputSchema={"type": "object", "additionalProperties": False},
+                )
+            ],
+            model="runtime-model",
+            remainingTokenBudget=2048,
+        )
+    )
+
+    assert result.assistant_message.content == "I will validate it."
+    assert result.assistant_message.tool_calls == [
+        ToolCall(id="call-2", name="validate_candidate", arguments={"candidate": "second"})
+    ]
+    assert result.usage.input_tokens == 120
+    assert result.usage.output_tokens == 30
+    assert result.provider_request_id == "resp-1"
+
+
+@pytest.mark.anyio
+async def test_openai_provider_rejects_invalid_tool_arguments() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call-1",
+                        "name": "inspect_diff",
+                        "arguments": "not-json",
+                    }
+                ]
+            },
+        )
+    )
+
+    with pytest.raises(ProviderError, match="invalid tool arguments"):
+        await OpenAIProvider("test-key", transport=transport).next_turn(
+            ModelTurnRequest(messages=[], tools=[], model="runtime-model", remainingTokenBudget=1)
+        )
 
 
 @pytest.mark.anyio

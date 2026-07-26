@@ -4,7 +4,7 @@ import pytest
 
 from app.agent import AgentConfigurationError, AgentResponseError, AgentService, create_agent_service
 from app.config import AgentConfig, ProjectConfig
-from app.models import ChangeRequest, GeneratedChange
+from app.models import AgentMessage, ChangeRequest, GeneratedChange, ModelTurnRequest
 from app.providers.base import ProviderRequest
 from app.providers.mock import MockProvider
 
@@ -112,6 +112,22 @@ async def test_mock_provider_can_return_a_reconciliation_noop() -> None:
     )
 
     assert result.action == "noop"
+
+
+@pytest.mark.anyio
+async def test_mock_provider_implements_model_turn_contract() -> None:
+    result = await MockProvider().next_turn(
+        ModelTurnRequest(
+            messages=[AgentMessage(role="user", content="Make it more energetic.")],
+            tools=[],
+            model="mock",
+            remainingTokenBudget=100,
+        )
+    )
+
+    assert result.assistant_message.role == "assistant"
+    assert result.assistant_message.content == "Mock model turn completed."
+    assert result.usage.total_tokens == 0
 
 
 def test_unknown_provider_is_a_configuration_error() -> None:

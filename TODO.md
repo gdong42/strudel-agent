@@ -83,7 +83,7 @@ workflow.
 
 - [x] **P4C.1** Define shared agent instructions and the structured final-change schema
 - [x] **P4C.2** Define `AgentRun`, model-turn, tool-call, final-result, and failure contracts
-- [ ] **P4C.3** Refactor providers from one-shot `create_change` into vendor-neutral model turns with normalized tool calls
+- [x] **P4C.3** Refactor providers from one-shot `create_change` into vendor-neutral model turns with normalized tool calls
 - [ ] **P4C.4** Implement the tool registry with `inspect_diff`, `validate_candidate`, `finalize_change`, and `request_user_input`
 - [ ] **P4C.5** Implement the bounded Agent Runtime loop with turn, time, token, and cancellation budgets
 - [ ] **P4C.6** Add run APIs and events for `running`, `needs_input`, `completed`, `failed`, and `cancelled`
