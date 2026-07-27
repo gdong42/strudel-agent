@@ -17,6 +17,7 @@ from app.models import (
     AgentFinalChange,
     AgentMessage,
     AgentRun,
+    AgentRunUsage,
     EditorVersion,
     ModelTurnRequest,
     ModelTurnResult,
@@ -228,11 +229,129 @@ async def test_execute_model_turn_returns_unknown_tool_as_a_private_fatal_result
 
 
 @pytest.mark.anyio
-async def test_execute_model_turn_leaves_provider_failures_for_budgeted_runtime_handling() -> None:
-    provider = ScriptedAgentProvider([ProviderError("provider unavailable", retryable=True)])
+async def test_execute_model_turn_sanitizes_provider_failures() -> None:
+    provider = ScriptedAgentProvider([ProviderError("provider unavailable: api-key=secret", retryable=True)])
 
-    with pytest.raises(ProviderError, match="provider unavailable"):
-        await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+    failed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert failed.status == "failed"
+    assert failed.failure is not None
+    assert failed.failure.code == "provider_error"
+    assert failed.failure.message == "The model provider could not complete this run."
+    assert failed.failure.retryable is True
+    assert "secret" not in json.dumps(failed.to_public().model_dump(by_alias=True))
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_sanitizes_unexpected_provider_failures() -> None:
+    provider = ScriptedAgentProvider([RuntimeError("private provider detail")])
+
+    failed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert failed.status == "failed"
+    assert failed.failure is not None
+    assert failed.failure.code == "internal_error"
+    assert failed.failure.message == "The agent run could not complete."
+    assert failed.failure.retryable is False
+    assert "private provider detail" not in json.dumps(failed.to_public().model_dump(by_alias=True))
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_sanitizes_malformed_provider_results() -> None:
+    class MalformedResultProvider:
+        async def next_turn(self, request: ModelTurnRequest) -> object:
+            return {"unexpected": "private provider detail"}
+
+    failed = await execute_model_turn(make_run(), MalformedResultProvider(), ToolRegistry(), now=110)
+
+    assert failed.status == "failed"
+    assert failed.failure is not None
+    assert failed.failure.code == "provider_error"
+    assert failed.failure.retryable is False
+    assert "private provider detail" not in json.dumps(failed.to_public().model_dump(by_alias=True))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("usage", "now", "message"),
+    [
+        (AgentRunUsage(turns=3), 110, "The agent run reached its turn limit."),
+        (AgentRunUsage(), 20_100, "The agent run exceeded its time limit."),
+        (AgentRunUsage(totalTokens=1000), 110, "The agent run exhausted its token budget."),
+    ],
+)
+async def test_execute_model_turn_fails_before_calling_provider_when_a_budget_is_exhausted(
+    usage: AgentRunUsage,
+    now: int,
+    message: str,
+) -> None:
+    provider = ScriptedAgentProvider([ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="unused"))])
+    run = make_run().model_copy(update={"usage": usage})
+
+    failed = await execute_model_turn(run, provider, ToolRegistry(), now=now)
+
+    assert failed.status == "failed"
+    assert failed.failure is not None
+    assert failed.failure.code == "budget_exhausted"
+    assert failed.failure.message == message
+    assert provider.requests == []
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_fails_when_a_returned_turn_exceeds_the_token_budget() -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("private")',
+                                "explanation": "private candidate code",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                ),
+                usage={"inputTokens": 800, "outputTokens": 201},
+            )
+        ]
+    )
+
+    failed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert failed.status == "failed"
+    assert failed.failure is not None
+    assert failed.failure.code == "budget_exhausted"
+    assert failed.usage.turns == 1
+    assert failed.usage.total_tokens == 1001
+    assert failed.tool_results == []
+    assert failed.final_change is None
+    assert 's("private")' not in json.dumps(failed.to_public().model_dump(by_alias=True))
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_fails_when_a_provider_result_arrives_after_the_time_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([101, 20_100])
+    monkeypatch.setattr(
+        "app.agent_runtime._timestamp",
+        lambda now: now if now is not None else next(timestamps),
+    )
+    provider = ScriptedAgentProvider([ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="too late"))])
+
+    failed = await execute_model_turn(make_run(), provider, ToolRegistry())
+
+    assert failed.status == "failed"
+    assert failed.failure is not None
+    assert failed.failure.code == "budget_exhausted"
+    assert failed.failure.message == "The agent run exceeded its time limit."
+    assert failed.usage.elapsed_seconds == 20
 
 
 @pytest.mark.anyio

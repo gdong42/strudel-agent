@@ -11,6 +11,7 @@ from .models import (
     AgentMessage,
     AgentRun,
     AgentRunBudget,
+    AgentRunFailure,
     AgentRunUsage,
     EditorVersion,
     LOCAL_PROJECT_ID,
@@ -22,7 +23,7 @@ from .models import (
     ToolResult,
 )
 from .prompt_contract import AGENT_RUNTIME_SYSTEM_PROMPT
-from .providers.base import AgentProvider
+from .providers.base import AgentProvider, ProviderError
 from .tools import ToolRegistry
 
 
@@ -144,16 +145,48 @@ async def execute_model_turn(
     _require_running(run)
     if not run.model:
         raise AgentRuntimeTransitionError("Running Agent Runs require a model")
+    started_at = _timestamp(now)
+    if failed_run := _budget_failure_before_turn(run, now=started_at):
+        return failed_run
     remaining_token_budget = max(run.budget.max_total_tokens - run.usage.total_tokens, 0)
-    result = await provider.next_turn(
-        ModelTurnRequest(
-            messages=[message.model_copy(deep=True) for message in run.messages],
-            tools=tools.definitions(),
-            model=run.model,
-            remainingTokenBudget=remaining_token_budget,
+    try:
+        result = await provider.next_turn(
+            ModelTurnRequest(
+                messages=[message.model_copy(deep=True) for message in run.messages],
+                tools=tools.definitions(),
+                model=run.model,
+                remainingTokenBudget=remaining_token_budget,
+            )
         )
-    )
-    updated = append_model_turn(run, result, now=now)
+    except ProviderError as error:
+        return _fail_run(
+            run,
+            code="provider_error",
+            message="The model provider could not complete this run.",
+            retryable=error.retryable,
+            now=_timestamp(now),
+        )
+    except Exception:
+        return _fail_run(
+            run,
+            code="internal_error",
+            message="The agent run could not complete.",
+            retryable=False,
+            now=_timestamp(now),
+        )
+
+    completed_at = _timestamp(now)
+    if not isinstance(result, ModelTurnResult):
+        return _fail_run(
+            run,
+            code="provider_error",
+            message="The model provider could not complete this run.",
+            retryable=False,
+            now=completed_at,
+        )
+    updated = append_model_turn(run, result, now=completed_at)
+    if failed_run := _budget_failure_after_turn(updated, now=completed_at):
+        return failed_run
     tool_calls = result.assistant_message.tool_calls
     if not tool_calls:
         return _append_runtime_feedback(
@@ -254,12 +287,80 @@ def _finalization_rejection(call: ToolCall, code: str, validation: ToolResult | 
     return ToolResult(callId=call.id, name=call.name, status="recoverable_error", output=output)
 
 
+def _budget_failure_before_turn(run: AgentRun, *, now: int) -> AgentRun | None:
+    if run.usage.turns >= run.budget.max_turns:
+        return _fail_run(
+            run,
+            code="budget_exhausted",
+            message="The agent run reached its turn limit.",
+            retryable=False,
+            now=now,
+        )
+    if _elapsed_seconds(run, now) >= run.budget.max_elapsed_seconds:
+        return _fail_run(
+            run,
+            code="budget_exhausted",
+            message="The agent run exceeded its time limit.",
+            retryable=False,
+            now=now,
+        )
+    if run.usage.total_tokens >= run.budget.max_total_tokens:
+        return _fail_run(
+            run,
+            code="budget_exhausted",
+            message="The agent run exhausted its token budget.",
+            retryable=False,
+            now=now,
+        )
+    return None
+
+
+def _budget_failure_after_turn(run: AgentRun, *, now: int) -> AgentRun | None:
+    if _elapsed_seconds(run, now) >= run.budget.max_elapsed_seconds:
+        return _fail_run(
+            run,
+            code="budget_exhausted",
+            message="The agent run exceeded its time limit.",
+            retryable=False,
+            now=now,
+        )
+    if run.usage.total_tokens > run.budget.max_total_tokens:
+        return _fail_run(
+            run,
+            code="budget_exhausted",
+            message="The agent run exhausted its token budget.",
+            retryable=False,
+            now=now,
+        )
+    return None
+
+
+def _fail_run(
+    run: AgentRun,
+    *,
+    code: str,
+    message: str,
+    retryable: bool,
+    now: int,
+) -> AgentRun:
+    return _rebuild_run(
+        run,
+        now=now,
+        status="failed",
+        failure=AgentRunFailure(code=code, message=message, retryable=retryable),
+    )
+
+
 def _rebuild_run(run: AgentRun, *, now: int | None, **updates: Any) -> AgentRun:
     timestamp = _timestamp(now)
     if timestamp < run.updated_at:
         raise AgentRuntimeTransitionError("Agent Run timestamp cannot move backwards")
     payload = run.model_dump(by_alias=True)
     payload.update(updates)
+    usage = AgentRunUsage.model_validate(payload["usage"])
+    payload["usage"] = usage.model_copy(
+        update={"elapsed_seconds": _elapsed_seconds(run, timestamp)}
+    ).model_dump(by_alias=True)
     payload["updatedAt"] = timestamp
     return AgentRun.model_validate(payload)
 
@@ -271,3 +372,7 @@ def _require_running(run: AgentRun) -> None:
 
 def _timestamp(now: int | None) -> int:
     return int(time.time() * 1000) if now is None else now
+
+
+def _elapsed_seconds(run: AgentRun, timestamp: int) -> int:
+    return max(0, (timestamp - run.created_at) // 1000)
