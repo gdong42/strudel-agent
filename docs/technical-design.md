@@ -289,6 +289,12 @@ Normal candidate failures, scope violations, tool errors that can be repaired,
 and self-review notes remain internal. Hidden model reasoning is neither
 requested nor persisted.
 
+Cancellation is cooperative: the active provider task is cancelled and awaited
+before the Run becomes `cancelled`. Cancellation wins over a concurrently
+returned provider result, so no candidate from that turn can enter tool
+processing or finalization. The later Run task owner retains this control and
+maps browser cancel commands to it.
+
 ### 6.6 Agent Run API
 
 ```text

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
 from app.agent_runtime import (
+    AgentRunCancellation,
     AgentRuntimeTransitionError,
     append_model_turn,
     append_tool_results,
     build_run_budget,
+    cancel_agent_run,
     create_agent_run,
     execute_model_turn,
 )
@@ -40,6 +43,21 @@ def make_run() -> AgentRun:
         now=100,
         run_id="run-1",
     )
+
+
+class BlockingAgentProvider:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = False
+
+    async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        raise AssertionError("Blocking provider unexpectedly completed")
 
 
 def test_create_agent_run_initializes_private_context_and_budget() -> None:
@@ -123,6 +141,114 @@ def test_runtime_transitions_reject_terminal_runs_and_backward_time() -> None:
         append_model_turn(completed, ModelTurnResult(assistantMessage=AgentMessage(role="assistant")), now=101)
     with pytest.raises(AgentRuntimeTransitionError, match="cannot move backwards"):
         append_tool_results(run, [], now=99)
+
+
+def test_cancel_agent_run_clears_a_pending_question_without_exposing_private_reason() -> None:
+    payload = make_run().model_dump(by_alias=True)
+    payload.update(
+        {
+            "status": "needs_input",
+            "pendingInput": {
+                "questionId": "tempo",
+                "question": "Keep the current tempo?",
+                "options": [],
+                "reason": "private ambiguity analysis",
+            },
+        }
+    )
+    paused = AgentRun.model_validate(payload)
+
+    cancelled = cancel_agent_run(paused, now=110)
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.pending_input is None
+    assert cancelled.to_public().question is None
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_honors_a_pre_cancelled_control_without_calling_the_provider() -> None:
+    cancellation = AgentRunCancellation()
+    cancellation.cancel()
+    provider = ScriptedAgentProvider([ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="unused"))])
+
+    cancelled = await execute_model_turn(
+        make_run(),
+        provider,
+        ToolRegistry(),
+        now=110,
+        cancellation=cancellation,
+    )
+
+    assert cancelled.status == "cancelled"
+    assert provider.requests == []
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_cancels_active_provider_work() -> None:
+    cancellation = AgentRunCancellation()
+    provider = BlockingAgentProvider()
+    task = asyncio.create_task(execute_model_turn(make_run(), provider, ToolRegistry(), now=110, cancellation=cancellation))
+
+    await provider.started.wait()
+    cancellation.cancel()
+    cancelled = await task
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.final_change is None
+    assert provider.cancelled is True
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_prefers_cancellation_over_a_concurrent_final_result() -> None:
+    cancellation = AgentRunCancellation()
+
+    class ConcurrentCancellationProvider:
+        async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            cancellation.cancel()
+            return ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd*4")',
+                                "explanation": "Should not be finalized.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            )
+
+    cancelled = await execute_model_turn(
+        make_run(),
+        ConcurrentCancellationProvider(),
+        ToolRegistry(),
+        now=110,
+        cancellation=cancellation,
+    )
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.final_change is None
+    assert cancelled.tool_results == []
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_cleans_up_provider_work_when_its_owner_is_cancelled() -> None:
+    provider = BlockingAgentProvider()
+    task = asyncio.create_task(
+        execute_model_turn(make_run(), provider, ToolRegistry(), now=110, cancellation=AgentRunCancellation())
+    )
+
+    await provider.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert provider.cancelled is True
 
 
 @pytest.mark.anyio

@@ -89,7 +89,7 @@ workflow.
 - [x] **P4C.5.2** Execute one model turn, run ordered tool calls, and return serialized tool results to the model
 - [x] **P4C.5.3** Handle `finalize_change`, `request_user_input`, invalid plain-text/terminal tool outcomes, and deterministic finalization gates
 - [x] **P4C.5.4.1** Enforce turn, time, and token budgets; sanitize terminal provider and runtime failures
-- [ ] **P4C.5.4.2** Define cancellable active-turn execution, then attach it to background-task ownership
+- [x] **P4C.5.4.2** Define cancellable active-turn execution; attach it to background-task ownership next
 - [ ] **P4C.6.1** Add in-memory Run storage and background-task ownership with credentials retained only for the active task
 - [ ] **P4C.6.2** Add start/read Run endpoints and public lifecycle events
 - [ ] **P4C.6.3** Add input, editor-update, and cancel commands for active Runs

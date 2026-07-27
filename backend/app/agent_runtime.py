@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -28,10 +29,28 @@ from .tools import ToolRegistry
 
 
 _TERMINAL_TOOL_NAMES = frozenset({"finalize_change", "request_user_input"})
+_CANCELLED_MODEL_TURN = object()
 
 
 class AgentRuntimeTransitionError(RuntimeError):
     pass
+
+
+class AgentRunCancellation:
+    """Cooperative cancellation signal owned by one active Agent Run task."""
+
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    async def wait(self) -> None:
+        await self._event.wait()
 
 
 def build_run_budget(config: AgentRuntimeConfig) -> AgentRunBudget:
@@ -133,32 +152,42 @@ def append_tool_results(run: AgentRun, results: list[ToolResult], *, now: int | 
     )
 
 
+def cancel_agent_run(run: AgentRun, *, now: int | None = None) -> AgentRun:
+    if run.status not in {"running", "needs_input"}:
+        raise AgentRuntimeTransitionError("Only active Agent Runs may be cancelled")
+    return _rebuild_run(run, now=now, status="cancelled", pendingInput=None)
+
+
 async def execute_model_turn(
     run: AgentRun,
     provider: AgentProvider,
     tools: ToolRegistry,
     *,
     now: int | None = None,
+    cancellation: AgentRunCancellation | None = None,
 ) -> AgentRun:
     """Run one provider turn and append its ordered tool observations privately."""
 
     _require_running(run)
+    if cancellation and cancellation.is_cancelled:
+        return cancel_agent_run(run, now=now)
     if not run.model:
         raise AgentRuntimeTransitionError("Running Agent Runs require a model")
     started_at = _timestamp(now)
     if failed_run := _budget_failure_before_turn(run, now=started_at):
         return failed_run
     remaining_token_budget = max(run.budget.max_total_tokens - run.usage.total_tokens, 0)
+    request = ModelTurnRequest(
+        messages=[message.model_copy(deep=True) for message in run.messages],
+        tools=tools.definitions(),
+        model=run.model,
+        remainingTokenBudget=remaining_token_budget,
+    )
     try:
-        result = await provider.next_turn(
-            ModelTurnRequest(
-                messages=[message.model_copy(deep=True) for message in run.messages],
-                tools=tools.definitions(),
-                model=run.model,
-                remainingTokenBudget=remaining_token_budget,
-            )
-        )
+        result = await _await_provider_turn(provider, request, cancellation)
     except ProviderError as error:
+        if cancellation and cancellation.is_cancelled:
+            return cancel_agent_run(run, now=_timestamp(now))
         return _fail_run(
             run,
             code="provider_error",
@@ -167,6 +196,8 @@ async def execute_model_turn(
             now=_timestamp(now),
         )
     except Exception:
+        if cancellation and cancellation.is_cancelled:
+            return cancel_agent_run(run, now=_timestamp(now))
         return _fail_run(
             run,
             code="internal_error",
@@ -176,6 +207,8 @@ async def execute_model_turn(
         )
 
     completed_at = _timestamp(now)
+    if result is _CANCELLED_MODEL_TURN or (cancellation and cancellation.is_cancelled):
+        return cancel_agent_run(run, now=completed_at)
     if not isinstance(result, ModelTurnResult):
         return _fail_run(
             run,
@@ -201,6 +234,29 @@ async def execute_model_turn(
         return _handle_terminal_tool(updated, terminal_calls[0], tools, now=now)
     tool_results = [tools.execute(call) for call in tool_calls]
     return append_tool_results(updated, tool_results, now=now)
+
+
+async def _await_provider_turn(
+    provider: AgentProvider,
+    request: ModelTurnRequest,
+    cancellation: AgentRunCancellation | None,
+) -> ModelTurnResult | object:
+    if cancellation is None:
+        return await provider.next_turn(request)
+
+    provider_task = asyncio.create_task(provider.next_turn(request))
+    cancellation_task = asyncio.create_task(cancellation.wait())
+    try:
+        await asyncio.wait({provider_task, cancellation_task}, return_when=asyncio.FIRST_COMPLETED)
+        if cancellation.is_cancelled:
+            return _CANCELLED_MODEL_TURN
+        return provider_task.result()
+    finally:
+        if not provider_task.done():
+            provider_task.cancel()
+        if not cancellation_task.done():
+            cancellation_task.cancel()
+        await asyncio.gather(provider_task, cancellation_task, return_exceptions=True)
 
 
 def _handle_terminal_tool(run: AgentRun, call: ToolCall, tools: ToolRegistry, *, now: int | None) -> AgentRun:
