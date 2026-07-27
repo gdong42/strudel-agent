@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
+import time
+from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main
 from app.agent import AgentService
-from app.main import app
-from app.models import GeneratedChange
+from app.agent_runs import AgentRunManager
+from app.models import AgentMessage, AgentRunPublic, GeneratedChange, ModelTurnResult, ToolCall
 from app.providers.base import ProviderRequest
+from tests.fakes import ScriptedAgentProvider
+
+
+app = main.app
 
 
 class EmptyCodeProvider:
@@ -143,3 +153,144 @@ def test_mock_provider_connection(project_paths: dict[str, Path]) -> None:
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_start_and_read_agent_run_exposes_only_public_state(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="input-1",
+                            name="request_user_input",
+                            arguments={
+                                "questionId": "tempo",
+                                "question": "Keep the current tempo?",
+                                "options": [{"id": "keep", "label": "Keep it", "description": None}],
+                                "reason": "private ambiguity analysis",
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+    monkeypatch.setattr(
+        main,
+        "create_agent_service",
+        lambda *args, **kwargs: AgentService(provider, provider_name="test-provider", model="test-model"),
+    )
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Make the drums more energetic.",
+                "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                "applyMode": "manual",
+            },
+            headers={"X-Agent-Provider": "mock"},
+        )
+
+        assert started.status_code == 202
+        started_payload = started.json()
+        assert set(started_payload) == {"id", "status", "question", "finalChange", "error"}
+        assert started_payload["status"] == "running"
+        assert "test-provider" not in json.dumps(started_payload)
+
+        current = started_payload
+        for _ in range(100):
+            current = client.get(f'/agent/runs/{started_payload["id"]}').json()
+            if current["status"] == "needs_input":
+                break
+            time.sleep(0.01)
+
+        assert current == {
+            "id": started_payload["id"],
+            "status": "needs_input",
+            "question": {
+                "id": "tempo",
+                "question": "Keep the current tempo?",
+                "options": [{"id": "keep", "label": "Keep it", "description": None}],
+            },
+            "finalChange": None,
+            "error": None,
+        }
+        assert "private ambiguity analysis" not in json.dumps(current)
+
+
+def test_default_mock_agent_run_completes(project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Make the drums more energetic.",
+                "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                "applyMode": "manual",
+            },
+        )
+        assert started.status_code == 202
+
+        current = started.json()
+        for _ in range(100):
+            current = client.get(f'/agent/runs/{current["id"]}').json()
+            if current["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+    assert current["status"] == "completed"
+    assert current["finalChange"]["code"] == 's("bd")\n\n// Agent draft: Make the drums more energetic.\n'
+
+
+def test_start_agent_run_rejects_empty_editor_code(project_paths: dict[str, Path]) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/agent/runs",
+        json={
+            "intent": "Make the drums more energetic.",
+            "editorVersion": {"code": " ", "hash": "editor-hash"},
+            "applyMode": "manual",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Agent Run editor code cannot be empty"
+
+
+def test_get_missing_agent_run_returns_404(project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+
+    with TestClient(app) as client:
+        response = client.get("/agent/runs/missing")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Agent Run not found"
+
+
+@pytest.mark.anyio
+async def test_agent_run_event_contains_only_public_payload() -> None:
+    queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+    main.clients.add(queue)
+    run = AgentRunPublic(
+        id="run-1",
+        status="needs_input",
+        question={"id": "tempo", "question": "Keep the current tempo?", "options": []},
+    )
+
+    try:
+        await main.broadcast_agent_run(run)
+        event, payload = await queue.get()
+    finally:
+        main.clients.discard(queue)
+
+    assert event == "agent-run"
+    assert payload == run.model_dump(by_alias=True)
+    assert set(payload) == {"id", "status", "question", "finalChange", "error"}

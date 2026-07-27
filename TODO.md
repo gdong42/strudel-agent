@@ -90,8 +90,8 @@ workflow.
 - [x] **P4C.5.3** Handle `finalize_change`, `request_user_input`, invalid plain-text/terminal tool outcomes, and deterministic finalization gates
 - [x] **P4C.5.4.1** Enforce turn, time, and token budgets; sanitize terminal provider and runtime failures
 - [x] **P4C.5.4.2** Define cancellable active-turn execution; attach it to background-task ownership next
-- [ ] **P4C.6.1** Add in-memory Run storage and background-task ownership with credentials retained only for the active task
-- [ ] **P4C.6.2** Add start/read Run endpoints and public lifecycle events
+- [x] **P4C.6.1a** Add an in-memory Run manager, worker loop, task ownership, and active-task credential confinement
+- [x] **P4C.6.2** Add start/read Run endpoints and public lifecycle events
 - [ ] **P4C.6.3** Add input, editor-update, and cancel commands for active Runs
 - [ ] **P4C.7.1** Replace the client generation path with Run status handling and final-only Manual Fire staging
 - [ ] **P4C.7.2** Add an editor-hash stage acknowledgement that persists a change only after the final Run is accepted

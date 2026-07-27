@@ -158,6 +158,11 @@ def cancel_agent_run(run: AgentRun, *, now: int | None = None) -> AgentRun:
     return _rebuild_run(run, now=now, status="cancelled", pendingInput=None)
 
 
+def fail_agent_run(run: AgentRun, failure: AgentRunFailure, *, now: int | None = None) -> AgentRun:
+    _require_running(run)
+    return _rebuild_run(run, now=now, status="failed", failure=failure)
+
+
 async def execute_model_turn(
     run: AgentRun,
     provider: AgentProvider,
@@ -399,11 +404,10 @@ def _fail_run(
     retryable: bool,
     now: int,
 ) -> AgentRun:
-    return _rebuild_run(
+    return fail_agent_run(
         run,
+        AgentRunFailure(code=code, message=message, retryable=retryable),
         now=now,
-        status="failed",
-        failure=AgentRunFailure(code=code, message=message, retryable=retryable),
     )
 
 

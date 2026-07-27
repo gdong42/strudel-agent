@@ -3,16 +3,22 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any, cast
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .agent import AgentConfigurationError, AgentResponseError, create_agent_service, list_provider_info
+from .agent_runs import AgentRunManager
+from .agent_runtime import AgentRuntimeTransitionError, build_run_budget
 from .changes import create_change, latest_change, undo_change
 from .config import load_config
 from .models import (
+    AgentRunPublic,
+    AgentRunStartRequest,
     ChangeListResponse,
     ChangeRequest,
     ChangeUndoResponse,
@@ -28,13 +34,20 @@ from .models import (
     ProviderTestRequest,
     ProviderTestResponse,
 )
-from .providers.base import ProviderError
+from .providers.base import AgentProvider, ProviderError
 from .snapshots import create_snapshot, latest_snapshot, list_snapshots, read_snapshot
 from .tracks import read_track, write_track
 
 
-app = FastAPI(title="Strudel Agent")
-clients: set[asyncio.Queue[dict[str, Any]]] = set()
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    await agent_runs.close()
+
+
+app = FastAPI(title="Strudel Agent", lifespan=lifespan)
+SseEvent = tuple[str, dict[str, Any]]
+clients: set[asyncio.Queue[SseEvent]] = set()
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,9 +71,19 @@ def encode_sse(event: str, data: dict[str, Any]) -> str:
 
 
 async def broadcast_track() -> None:
-    payload = track_event()
+    await broadcast("track", track_event())
+
+
+async def broadcast_agent_run(run: AgentRunPublic) -> None:
+    await broadcast("agent-run", run.model_dump(by_alias=True))
+
+
+async def broadcast(event: str, payload: dict[str, Any]) -> None:
     for queue in list(clients):
-        await queue.put(payload)
+        await queue.put((event, payload))
+
+
+agent_runs = AgentRunManager(on_update=broadcast_agent_run)
 
 
 @app.get("/track")
@@ -137,6 +160,46 @@ async def test_agent_provider(payload: ProviderTestRequest) -> dict[str, Any]:
     return ProviderTestResponse(ok=True, message="Provider connection is ready").model_dump(by_alias=True)
 
 
+@app.post("/agent/runs", status_code=202)
+async def start_agent_run(
+    payload: AgentRunStartRequest,
+    x_agent_provider: str | None = Header(default=None),
+    x_agent_model: str | None = Header(default=None),
+    x_agent_api_key: str | None = Header(default=None),
+) -> AgentRunPublic:
+    if not payload.intent.strip():
+        raise HTTPException(status_code=400, detail="Agent Run intent cannot be empty")
+    if not payload.editor_version.code.strip():
+        raise HTTPException(status_code=400, detail="Agent Run editor code cannot be empty")
+
+    try:
+        service = create_agent_service(
+            x_agent_provider,
+            model=x_agent_model,
+            api_key=x_agent_api_key,
+        )
+        run = await agent_runs.start(
+            intent=payload.intent,
+            editor_version=payload.editor_version,
+            apply_mode=payload.apply_mode,
+            budget=build_run_budget(load_config().agent.runtime),
+            provider_name=service.provider_name,
+            model=service.model or service.provider_name,
+            provider=cast(AgentProvider, service.provider),
+        )
+    except (AgentConfigurationError, AgentRuntimeTransitionError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return run.to_public()
+
+
+@app.get("/agent/runs/{run_id}")
+async def get_agent_run(run_id: str) -> AgentRunPublic:
+    run = await agent_runs.get_public(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent Run not found")
+    return run
+
+
 @app.post("/changes")
 async def post_change(
     payload: ChangeRequest,
@@ -179,15 +242,15 @@ async def post_change_undo(change_id: str) -> dict[str, Any]:
 
 @app.get("/events")
 async def events() -> StreamingResponse:
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    queue: asyncio.Queue[SseEvent] = asyncio.Queue()
     clients.add(queue)
 
     async def stream():
         try:
             yield encode_sse("track", track_event())
             while True:
-                payload = await queue.get()
-                yield encode_sse("track", payload)
+                event, payload = await queue.get()
+                yield encode_sse(event, payload)
         finally:
             clients.discard(queue)
 

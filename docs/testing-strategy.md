@@ -147,7 +147,7 @@ results, not assert a model's private reasoning.
 | `POST /agent/runs/:id/input` | Resumes a `needs_input` run | 409 unless run is waiting for input |
 | `POST /agent/runs/:id/editor` | Supplies latest editor version | Rejects invalid/stale sequencing safely |
 | `POST /agent/runs/:id/cancel` | Cancels without staging | Idempotent terminal behavior |
-| `GET /events` | Initial `track` event format | Queue cleanup and reconnect behavior covered by E2E/manual smoke |
+| `GET /events` | Initial `track` event and public `agent-run` lifecycle payload | Queue cleanup/reconnect behavior and public-payload boundary covered by E2E/manual smoke |
 
 ### 4.3 Shared fixture
 

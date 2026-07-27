@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.agent import AgentConfigurationError, AgentResponseError, AgentService, create_agent_service
@@ -118,7 +120,17 @@ async def test_mock_provider_can_return_a_reconciliation_noop() -> None:
 async def test_mock_provider_implements_model_turn_contract() -> None:
     result = await MockProvider().next_turn(
         ModelTurnRequest(
-            messages=[AgentMessage(role="user", content="Make it more energetic.")],
+            messages=[
+                AgentMessage(
+                    role="user",
+                    content=json.dumps(
+                        {
+                            "intent": "Make it more energetic.",
+                            "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                        }
+                    ),
+                )
+            ],
             tools=[],
             model="mock",
             remainingTokenBudget=100,
@@ -126,7 +138,8 @@ async def test_mock_provider_implements_model_turn_contract() -> None:
     )
 
     assert result.assistant_message.role == "assistant"
-    assert result.assistant_message.content == "Mock model turn completed."
+    assert result.assistant_message.tool_calls[0].name == "finalize_change"
+    assert result.assistant_message.tool_calls[0].arguments["code"] == 's("bd")\n\n// Agent draft: Make it more energetic.\n'
     assert result.usage.total_tokens == 0
 
 

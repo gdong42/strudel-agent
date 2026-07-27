@@ -295,6 +295,11 @@ returned provider result, so no candidate from that turn can enter tool
 processing or finalization. The later Run task owner retains this control and
 maps browser cancel commands to it.
 
+The in-memory Run manager owns private Run state, the cancellation signal, and
+the worker task. A Provider instance, including any API key it holds, is passed
+only into that active worker and is not retained in the manager after the worker
+pauses or reaches a terminal state.
+
 ### 6.6 Agent Run API
 
 ```text
@@ -319,6 +324,12 @@ The public representation excludes internal candidates, recoverable findings,
 raw provider messages, and hidden reasoning. Run audit records may retain user
 messages, tool names, tool outcomes, usage, final result, and provider metadata,
 but never credentials or hidden chain-of-thought.
+
+`GET /events` retains the existing `track` event and adds an `agent-run` event.
+Each `agent-run` payload is exactly an `AgentRunPublic` projection. The Run
+manager emits it when a Run enters `running` and whenever that public
+projection changes; tool-loop progress that remains internal does not produce
+browser events.
 
 Concurrent editing becomes a run-context update. Before final staging, the
 browser and runtime compare editor hashes. A newer editor version is supplied to
@@ -345,13 +356,13 @@ editing.
 
 | Module | Responsibility |
 |---|---|
-| `backend/app/main.py` | FastAPI app setup, route registration, SSE management |
+| `backend/app/main.py` | FastAPI app setup, route registration, track and public Agent Run SSE management |
 | `backend/app/models.py` | Pydantic request/response/project/session state models |
 | `backend/app/tracks.py` | Track file I/O (read from `tracks/`, write to `tracks/`) |
 | `backend/app/snapshots.py` | Snapshot CRUD, pruning (keep last 50 or 24h) |
 | `backend/app/changes.py` | Persist, list, and undo completed final changes only |
 | `backend/app/agent_runtime.py` | Agent Run lifecycle, budgets, model turns, pause/resume, and finalization |
-| `backend/app/agent_runs.py` | Run state storage and public run projections |
+| `backend/app/agent_runs.py` | In-memory Run state, worker task ownership, cancellation, and public projections |
 | `backend/app/prompt_contract.py` | Shared agent instructions and final-change schema |
 | `backend/app/tools/` | Tool registry and deterministic tool implementations |
 | `backend/app/providers/` | Vendor-specific model-turn and tool-call adapters |
@@ -375,7 +386,7 @@ editing.
 ## 8. API Endpoints
 
 ```text
-GET  /events                     SSE stream (track updates, agent notifications)
+GET  /events                     SSE stream (`track` and public `agent-run` updates)
 POST /track                      Save editor code to disk (from evaluate)
 GET  /state                      Current local project/session runtime state
 GET  /agent/settings             Provider defaults and installed provider capabilities
