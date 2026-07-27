@@ -14,10 +14,13 @@ from .models import (
     EditorVersion,
     LOCAL_PROJECT_ID,
     LOCAL_SESSION_ID,
+    ModelTurnRequest,
     ModelTurnResult,
     ToolResult,
 )
 from .prompt_contract import AGENT_RUNTIME_SYSTEM_PROMPT
+from .providers.base import AgentProvider
+from .tools import ToolRegistry
 
 
 class AgentRuntimeTransitionError(RuntimeError):
@@ -121,6 +124,34 @@ def append_tool_results(run: AgentRun, results: list[ToolResult], *, now: int | 
         messages=[*run.messages, *tool_messages],
         toolResults=[*run.tool_results, *(result.model_copy(deep=True) for result in results)],
     )
+
+
+async def execute_model_turn(
+    run: AgentRun,
+    provider: AgentProvider,
+    tools: ToolRegistry,
+    *,
+    now: int | None = None,
+) -> AgentRun:
+    """Run one provider turn and append its ordered tool observations privately."""
+
+    _require_running(run)
+    if not run.model:
+        raise AgentRuntimeTransitionError("Running Agent Runs require a model")
+    remaining_token_budget = max(run.budget.max_total_tokens - run.usage.total_tokens, 0)
+    result = await provider.next_turn(
+        ModelTurnRequest(
+            messages=[message.model_copy(deep=True) for message in run.messages],
+            tools=tools.definitions(),
+            model=run.model,
+            remainingTokenBudget=remaining_token_budget,
+        )
+    )
+    updated = append_model_turn(run, result, now=now)
+    if not result.assistant_message.tool_calls:
+        return updated
+    tool_results = [tools.execute(call) for call in result.assistant_message.tool_calls]
+    return append_tool_results(updated, tool_results, now=now)
 
 
 def _rebuild_run(run: AgentRun, *, now: int | None, **updates: Any) -> AgentRun:
