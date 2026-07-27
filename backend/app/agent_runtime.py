@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .config import AgentRuntimeConfig
 from .models import (
+    AgentFinalChange,
     AgentMessage,
     AgentRun,
     AgentRunBudget,
@@ -16,11 +17,16 @@ from .models import (
     LOCAL_SESSION_ID,
     ModelTurnRequest,
     ModelTurnResult,
+    RequestUserInput,
+    ToolCall,
     ToolResult,
 )
 from .prompt_contract import AGENT_RUNTIME_SYSTEM_PROMPT
 from .providers.base import AgentProvider
 from .tools import ToolRegistry
+
+
+_TERMINAL_TOOL_NAMES = frozenset({"finalize_change", "request_user_input"})
 
 
 class AgentRuntimeTransitionError(RuntimeError):
@@ -148,10 +154,104 @@ async def execute_model_turn(
         )
     )
     updated = append_model_turn(run, result, now=now)
-    if not result.assistant_message.tool_calls:
-        return updated
-    tool_results = [tools.execute(call) for call in result.assistant_message.tool_calls]
+    tool_calls = result.assistant_message.tool_calls
+    if not tool_calls:
+        return _append_runtime_feedback(
+            updated,
+            "The previous response did not request a tool. Continue by calling an available tool.",
+            now=now,
+        )
+    terminal_calls = [call for call in tool_calls if call.name in _TERMINAL_TOOL_NAMES]
+    if terminal_calls:
+        if len(tool_calls) != 1 or len(terminal_calls) != 1:
+            return append_tool_results(updated, _terminal_conflict_results(tool_calls), now=now)
+        return _handle_terminal_tool(updated, terminal_calls[0], tools, now=now)
+    tool_results = [tools.execute(call) for call in tool_calls]
     return append_tool_results(updated, tool_results, now=now)
+
+
+def _handle_terminal_tool(run: AgentRun, call: ToolCall, tools: ToolRegistry, *, now: int | None) -> AgentRun:
+    result = tools.execute(call)
+    if result.status != "ok":
+        return append_tool_results(run, [result], now=now)
+    if call.name == "finalize_change":
+        return _finalize_run(run, call, result, tools, now=now)
+    return _pause_for_input(run, call, result, now=now)
+
+
+def _finalize_run(
+    run: AgentRun,
+    call: ToolCall,
+    result: ToolResult,
+    tools: ToolRegistry,
+    *,
+    now: int | None,
+) -> AgentRun:
+    try:
+        final_change = AgentFinalChange.model_validate(result.output["finalChange"])
+    except (KeyError, TypeError, ValueError):
+        return append_tool_results(run, [_protocol_error_result(call, "invalid_final_change")], now=now)
+
+    if final_change.action == "noop" and final_change.code != run.editor_version.code:
+        return append_tool_results(run, [_finalization_rejection(call, "noop_changed_code")], now=now)
+
+    validation = tools.execute(
+        ToolCall(
+            id=call.id,
+            name="validate_candidate",
+            arguments={"candidateCode": final_change.code},
+        )
+    )
+    if validation.status != "ok" or validation.output.get("valid") is not True:
+        return append_tool_results(run, [_finalization_rejection(call, "candidate_validation_failed", validation)], now=now)
+
+    with_result = append_tool_results(run, [result], now=now)
+    return _rebuild_run(with_result, now=now, status="completed", finalChange=final_change)
+
+
+def _pause_for_input(run: AgentRun, call: ToolCall, result: ToolResult, *, now: int | None) -> AgentRun:
+    try:
+        request = RequestUserInput.model_validate(result.output["request"])
+    except (KeyError, TypeError, ValueError):
+        return append_tool_results(run, [_protocol_error_result(call, "invalid_input_request")], now=now)
+    with_result = append_tool_results(run, [result], now=now)
+    return _rebuild_run(with_result, now=now, status="needs_input", pendingInput=request)
+
+
+def _append_runtime_feedback(run: AgentRun, message: str, *, now: int | None) -> AgentRun:
+    return _rebuild_run(
+        run,
+        now=now,
+        messages=[
+            *run.messages,
+            AgentMessage(role="user", content=json.dumps({"runtimeFeedback": message}, separators=(",", ":"))),
+        ],
+    )
+
+
+def _terminal_conflict_results(calls: list[ToolCall]) -> list[ToolResult]:
+    return [_protocol_error_result(call, "terminal_tool_conflict") for call in calls]
+
+
+def _protocol_error_result(call: ToolCall, code: str) -> ToolResult:
+    return ToolResult(
+        callId=call.id,
+        name=call.name,
+        status="recoverable_error",
+        output={"error": {"code": code, "message": "The terminal tool protocol was not satisfied."}},
+    )
+
+
+def _finalization_rejection(call: ToolCall, code: str, validation: ToolResult | None = None) -> ToolResult:
+    output: dict[str, Any] = {
+        "error": {
+            "code": code,
+            "message": "The proposed final change did not pass deterministic finalization.",
+        }
+    }
+    if validation:
+        output["validation"] = validation.output
+    return ToolResult(callId=call.id, name=call.name, status="recoverable_error", output=output)
 
 
 def _rebuild_run(run: AgentRun, *, now: int | None, **updates: Any) -> AgentRun:

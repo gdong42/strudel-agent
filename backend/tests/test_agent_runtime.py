@@ -191,7 +191,7 @@ async def test_execute_model_turn_runs_tools_in_provider_order_and_returns_inter
 
 
 @pytest.mark.anyio
-async def test_execute_model_turn_preserves_plain_text_for_next_runtime_step() -> None:
+async def test_execute_model_turn_preserves_plain_text_and_appends_runtime_feedback() -> None:
     run = make_run()
     provider = ScriptedAgentProvider(
         [ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="I need to think again."))]
@@ -199,7 +199,10 @@ async def test_execute_model_turn_preserves_plain_text_for_next_runtime_step() -
 
     updated = await execute_model_turn(run, provider, ToolRegistry(), now=110)
 
-    assert updated.messages[-1].content == "I need to think again."
+    assert updated.messages[-2].content == "I need to think again."
+    assert json.loads(updated.messages[-1].content)["runtimeFeedback"] == (
+        "The previous response did not request a tool. Continue by calling an available tool."
+    )
     assert updated.tool_results == []
 
 
@@ -230,3 +233,174 @@ async def test_execute_model_turn_leaves_provider_failures_for_budgeted_runtime_
 
     with pytest.raises(ProviderError, match="provider unavailable"):
         await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_completes_only_after_a_valid_finalization_request() -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd*4")',
+                                "explanation": "Added a four-on-the-floor kick.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+
+    completed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert completed.status == "completed"
+    assert completed.final_change is not None
+    assert completed.final_change.code == 's("bd*4")'
+    assert completed.to_public().final_change is not None
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_returns_invalid_finalization_to_the_run() -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 'eval("bad")',
+                                "explanation": "Unsafe change.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+
+    updated = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert updated.status == "running"
+    assert updated.final_change is None
+    assert updated.tool_results[-1].status == "recoverable_error"
+    assert updated.tool_results[-1].output["error"]["code"] == "candidate_validation_failed"
+    assert updated.tool_results[-1].output["validation"]["valid"] is False
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_rejects_noop_that_changes_editor_code() -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("hh")',
+                                "explanation": "Nothing changed.",
+                                "action": "noop",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+
+    updated = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert updated.status == "running"
+    assert updated.tool_results[-1].output["error"]["code"] == "noop_changed_code"
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_pauses_only_for_a_valid_input_request() -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="input-1",
+                            name="request_user_input",
+                            arguments={
+                                "questionId": "tempo",
+                                "question": "Should the tempo stay at 124 BPM?",
+                                "options": [{"id": "keep", "label": "Keep 124 BPM"}],
+                                "reason": "The arrangement conflicts with a tempo change.",
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+
+    paused = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert paused.status == "needs_input"
+    assert paused.pending_input is not None
+    assert paused.pending_input.reason == "The arrangement conflicts with a tempo change."
+    assert paused.to_public().question is not None
+    assert paused.to_public().question.question == "Should the tempo stay at 124 BPM?"
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_returns_plain_text_and_terminal_conflicts_to_the_run() -> None:
+    plain_text_provider = ScriptedAgentProvider(
+        [ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="Done."))]
+    )
+    plain_text = await execute_model_turn(make_run(), plain_text_provider, ToolRegistry(), now=110)
+
+    assert plain_text.status == "running"
+    assert json.loads(plain_text.messages[-1].content)["runtimeFeedback"] == (
+        "The previous response did not request a tool. Continue by calling an available tool."
+    )
+
+    conflict_provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(id="diff-1", name="inspect_diff", arguments={"baseCode": "a", "candidateCode": "b"}),
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd")',
+                                "explanation": "Done.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        ),
+                    ],
+                )
+            )
+        ]
+    )
+    conflict = await execute_model_turn(make_run(), conflict_provider, ToolRegistry(), now=110)
+
+    assert conflict.status == "running"
+    assert [result.output["error"]["code"] for result in conflict.tool_results] == [
+        "terminal_tool_conflict",
+        "terminal_tool_conflict",
+    ]

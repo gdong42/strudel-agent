@@ -87,7 +87,7 @@ workflow.
 - [x] **P4C.4** Implement the tool registry with `inspect_diff`, `validate_candidate`, `finalize_change`, and `request_user_input`
 - [x] **P4C.5.1** Add validated Run construction, immutable transitions, and a scripted model-turn test provider
 - [x] **P4C.5.2** Execute one model turn, run ordered tool calls, and return serialized tool results to the model
-- [ ] **P4C.5.3** Handle `finalize_change`, `request_user_input`, and invalid plain-text/terminal tool outcomes
+- [x] **P4C.5.3** Handle `finalize_change`, `request_user_input`, invalid plain-text/terminal tool outcomes, and deterministic finalization gates
 - [ ] **P4C.5.4** Enforce turn, time, and token budgets; cancel active provider work and sanitize terminal failures
 - [ ] **P4C.6.1** Add in-memory Run storage and background-task ownership with credentials retained only for the active task
 - [ ] **P4C.6.2** Add start/read Run endpoints and public lifecycle events
