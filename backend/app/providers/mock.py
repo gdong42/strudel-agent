@@ -52,6 +52,8 @@ class MockProvider:
 
     @staticmethod
     def _runtime_input(request: ModelTurnRequest) -> tuple[str, str]:
+        intent: str | None = None
+        code: str | None = None
         for message in request.messages:
             if message.role != "user":
                 continue
@@ -61,11 +63,18 @@ class MockProvider:
                 continue
             if not isinstance(payload, dict):
                 continue
-            intent = payload.get("intent")
+            candidate_intent = payload.get("intent")
             editor_version = payload.get("editorVersion")
-            if not isinstance(intent, str) or not isinstance(editor_version, dict):
+            if isinstance(candidate_intent, str):
+                intent = candidate_intent
+            if isinstance(editor_version, dict) and isinstance(editor_version.get("code"), str):
+                code = editor_version["code"]
+            editor_update = payload.get("editorUpdate")
+            if not isinstance(editor_update, dict):
                 continue
-            code = editor_version.get("code")
-            if isinstance(code, str):
-                return intent, code
+            updated_version = editor_update.get("editorVersion")
+            if isinstance(updated_version, dict) and isinstance(updated_version.get("code"), str):
+                code = updated_version["code"]
+        if isinstance(intent, str) and isinstance(code, str):
+            return intent, code
         raise ProviderError("Mock model turn is missing the initial Agent Run input")

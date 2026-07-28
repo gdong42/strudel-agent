@@ -143,6 +143,43 @@ async def test_mock_provider_implements_model_turn_contract() -> None:
     assert result.usage.total_tokens == 0
 
 
+@pytest.mark.anyio
+async def test_mock_provider_uses_the_latest_runtime_editor_version() -> None:
+    result = await MockProvider().next_turn(
+        ModelTurnRequest(
+            messages=[
+                AgentMessage(
+                    role="user",
+                    content=json.dumps(
+                        {
+                            "intent": "Make it more energetic.",
+                            "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                        }
+                    ),
+                ),
+                AgentMessage(
+                    role="user",
+                    content=json.dumps(
+                        {
+                            "editorUpdate": {
+                                "baseHash": "editor-hash",
+                                "editorVersion": {"code": 's("hh")', "hash": "latest-hash"},
+                            }
+                        }
+                    ),
+                ),
+            ],
+            tools=[],
+            model="mock",
+            remainingTokenBudget=100,
+        )
+    )
+
+    assert result.assistant_message.tool_calls[0].arguments["code"] == (
+        's("hh")\n\n// Agent draft: Make it more energetic.\n'
+    )
+
+
 def test_unknown_provider_is_a_configuration_error() -> None:
     with pytest.raises(AgentConfigurationError, match="unknown-provider"):
         create_agent_service("unknown-provider")

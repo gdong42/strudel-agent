@@ -14,6 +14,8 @@ from app.agent_runtime import (
     cancel_agent_run,
     create_agent_run,
     execute_model_turn,
+    resume_agent_run,
+    update_agent_run_editor_version,
 )
 from app.config import AgentRuntimeConfig
 from app.models import (
@@ -43,6 +45,22 @@ def make_run() -> AgentRun:
         now=100,
         run_id="run-1",
     )
+
+
+def make_paused_run() -> AgentRun:
+    payload = make_run().model_dump(by_alias=True)
+    payload.update(
+        {
+            "status": "needs_input",
+            "pendingInput": {
+                "questionId": "tempo",
+                "question": "Keep the current tempo?",
+                "options": [],
+                "reason": "private ambiguity analysis",
+            },
+        }
+    )
+    return AgentRun.model_validate(payload)
 
 
 class BlockingAgentProvider:
@@ -144,25 +162,67 @@ def test_runtime_transitions_reject_terminal_runs_and_backward_time() -> None:
 
 
 def test_cancel_agent_run_clears_a_pending_question_without_exposing_private_reason() -> None:
-    payload = make_run().model_dump(by_alias=True)
-    payload.update(
-        {
-            "status": "needs_input",
-            "pendingInput": {
-                "questionId": "tempo",
-                "question": "Keep the current tempo?",
-                "options": [],
-                "reason": "private ambiguity analysis",
-            },
-        }
-    )
-    paused = AgentRun.model_validate(payload)
+    paused = make_paused_run()
 
     cancelled = cancel_agent_run(paused, now=110)
 
     assert cancelled.status == "cancelled"
     assert cancelled.pending_input is None
     assert cancelled.to_public().question is None
+
+
+def test_resume_agent_run_appends_the_answer_and_latest_editor_version() -> None:
+    paused = make_paused_run()
+
+    resumed = resume_agent_run(paused, question_id="tempo", answer="  Keep it at 124.  ", now=110)
+
+    assert paused.status == "needs_input"
+    assert resumed.status == "running"
+    assert resumed.pending_input is None
+    assert json.loads(resumed.messages[-1].content) == {
+        "userInput": {"questionId": "tempo", "answer": "Keep it at 124."},
+        "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+    }
+
+    with pytest.raises(AgentRuntimeTransitionError, match="does not match"):
+        resume_agent_run(paused, question_id="wrong", answer="Keep it at 124.", now=110)
+
+
+def test_editor_update_requires_the_latest_hash_and_appends_private_context() -> None:
+    run = make_run()
+    next_version = EditorVersion(code='s("bd*4")', hash="next-hash")
+
+    updated = update_agent_run_editor_version(
+        run,
+        base_hash="editor-hash",
+        editor_version=next_version,
+        now=110,
+    )
+
+    assert run.editor_version.code == 's("bd")'
+    assert updated.editor_version == next_version
+    assert json.loads(updated.messages[-1].content) == {
+        "editorUpdate": {
+            "baseHash": "editor-hash",
+            "editorVersion": {"code": 's("bd*4")', "hash": "next-hash"},
+        }
+    }
+
+    with pytest.raises(AgentRuntimeTransitionError, match="stale"):
+        update_agent_run_editor_version(
+            updated,
+            base_hash="editor-hash",
+            editor_version=EditorVersion(code='s("hh")', hash="another-hash"),
+            now=120,
+        )
+
+    with pytest.raises(AgentRuntimeTransitionError, match="reuses a hash"):
+        update_agent_run_editor_version(
+            run,
+            base_hash="editor-hash",
+            editor_version=EditorVersion(code='s("hh")', hash="editor-hash"),
+            now=120,
+        )
 
 
 @pytest.mark.anyio

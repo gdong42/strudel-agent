@@ -92,7 +92,7 @@ workflow.
 - [x] **P4C.5.4.2** Define cancellable active-turn execution; attach it to background-task ownership next
 - [x] **P4C.6.1a** Add an in-memory Run manager, worker loop, task ownership, and active-task credential confinement
 - [x] **P4C.6.2** Add start/read Run endpoints and public lifecycle events
-- [ ] **P4C.6.3** Add input, editor-update, and cancel commands for active Runs
+- [x] **P4C.6.3** Add input, editor-update, and cancel commands for active Runs
 - [ ] **P4C.7.1** Replace the client generation path with Run status handling and final-only Manual Fire staging
 - [ ] **P4C.7.2** Add an editor-hash stage acknowledgement that persists a change only after the final Run is accepted
 - [ ] **P4C.7.3** Enable Auto Fire only after accepted staging and deterministic finalization gates

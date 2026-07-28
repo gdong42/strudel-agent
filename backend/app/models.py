@@ -303,6 +303,7 @@ class AgentRunInputRequest(BaseModel):
 class AgentRunEditorUpdateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    base_hash: str = Field(alias="baseHash", min_length=1)
     editor_version: EditorVersion = Field(alias="editorVersion")
 
 

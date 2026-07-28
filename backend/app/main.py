@@ -17,6 +17,8 @@ from .agent_runtime import AgentRuntimeTransitionError, build_run_budget
 from .changes import create_change, latest_change, undo_change
 from .config import load_config
 from .models import (
+    AgentRunEditorUpdateRequest,
+    AgentRunInputRequest,
     AgentRunPublic,
     AgentRunStartRequest,
     ChangeListResponse,
@@ -198,6 +200,70 @@ async def get_agent_run(run_id: str) -> AgentRunPublic:
     if not run:
         raise HTTPException(status_code=404, detail="Agent Run not found")
     return run
+
+
+@app.post("/agent/runs/{run_id}/input", status_code=202)
+async def answer_agent_run(
+    run_id: str,
+    payload: AgentRunInputRequest,
+    x_agent_provider: str | None = Header(default=None),
+    x_agent_model: str | None = Header(default=None),
+    x_agent_api_key: str | None = Header(default=None),
+) -> AgentRunPublic:
+    if not payload.question_id.strip() or not payload.answer.strip():
+        raise HTTPException(status_code=400, detail="Agent Run input requires a question and answer")
+    existing_run = await agent_runs.get(run_id)
+    if not existing_run:
+        raise HTTPException(status_code=404, detail="Agent Run not found")
+    if existing_run.status != "needs_input":
+        raise HTTPException(status_code=409, detail="Only paused Agent Runs may receive user input")
+
+    try:
+        service = create_agent_service(
+            x_agent_provider,
+            model=x_agent_model,
+            api_key=x_agent_api_key,
+        )
+        run = await agent_runs.resume(
+            run_id,
+            question_id=payload.question_id,
+            answer=payload.answer,
+            provider_name=service.provider_name,
+            model=service.model or service.provider_name,
+            provider=cast(AgentProvider, service.provider),
+        )
+    except AgentConfigurationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except AgentRuntimeTransitionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent Run not found")
+    return run.to_public()
+
+
+@app.post("/agent/runs/{run_id}/editor")
+async def update_agent_run_editor(run_id: str, payload: AgentRunEditorUpdateRequest) -> AgentRunPublic:
+    if not payload.base_hash.strip() or not payload.editor_version.code.strip():
+        raise HTTPException(status_code=400, detail="Agent Run editor updates require non-empty code and hashes")
+    try:
+        run = await agent_runs.update_editor(
+            run_id,
+            base_hash=payload.base_hash,
+            editor_version=payload.editor_version,
+        )
+    except AgentRuntimeTransitionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent Run not found")
+    return run.to_public()
+
+
+@app.post("/agent/runs/{run_id}/cancel")
+async def cancel_agent_run(run_id: str) -> AgentRunPublic:
+    run = await agent_runs.cancel(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent Run not found")
+    return run.to_public()
 
 
 @app.post("/changes")

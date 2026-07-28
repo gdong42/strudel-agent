@@ -144,8 +144,8 @@ results, not assert a model's private reasoning.
 | `POST /snapshots/:id/revert` | Reverts track and returns snapshot | 404 on unknown id |
 | `POST /agent/runs` | Starts a run and returns public status | 400 on empty intent/code; provider config errors are sanitized |
 | `GET /agent/runs/:id` | Returns public run projection | 404 on unknown id; excludes candidates/provider internals |
-| `POST /agent/runs/:id/input` | Resumes a `needs_input` run | 409 unless run is waiting for input |
-| `POST /agent/runs/:id/editor` | Supplies latest editor version | Rejects invalid/stale sequencing safely |
+| `POST /agent/runs/:id/input` | Resumes a `needs_input` run with the original provider/model | 409 for wrong run state, question, or provider/model |
+| `POST /agent/runs/:id/editor` | Supplies latest editor version with `baseHash` | Rejects terminal or stale sequencing; supersedes active model turn safely |
 | `POST /agent/runs/:id/cancel` | Cancels without staging | Idempotent terminal behavior |
 | `GET /events` | Initial `track` event and public `agent-run` lifecycle payload | Queue cleanup/reconnect behavior and public-payload boundary covered by E2E/manual smoke |
 

@@ -176,7 +176,24 @@ def test_start_and_read_agent_run_exposes_only_public_state(
                         )
                     ],
                 )
-            )
+            ),
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd*4")',
+                                "explanation": "Added a four-on-the-floor kick.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            ),
         ]
     )
     monkeypatch.setattr(main, "agent_runs", AgentRunManager())
@@ -223,6 +240,45 @@ def test_start_and_read_agent_run_exposes_only_public_state(
         }
         assert "private ambiguity analysis" not in json.dumps(current)
 
+        editor_updated = client.post(
+            f'/agent/runs/{started_payload["id"]}/editor',
+            json={
+                "baseHash": "editor-hash",
+                "editorVersion": {"code": 's("bd*4")', "hash": "latest-hash"},
+            },
+        )
+        assert editor_updated.status_code == 200
+        assert editor_updated.json()["status"] == "needs_input"
+
+        stale_editor_update = client.post(
+            f'/agent/runs/{started_payload["id"]}/editor',
+            json={
+                "baseHash": "editor-hash",
+                "editorVersion": {"code": 's("hh")', "hash": "stale-hash"},
+            },
+        )
+        assert stale_editor_update.status_code == 409
+
+        resumed = client.post(
+            f'/agent/runs/{started_payload["id"]}/input',
+            json={"questionId": "tempo", "answer": "Keep it at 124."},
+            headers={"X-Agent-Provider": "mock"},
+        )
+        assert resumed.status_code == 202
+        assert resumed.json()["status"] == "running"
+
+        for _ in range(100):
+            current = client.get(f'/agent/runs/{started_payload["id"]}').json()
+            if current["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+        assert current["status"] == "completed"
+        assert json.loads(provider.requests[-1].messages[-1].content) == {
+            "userInput": {"questionId": "tempo", "answer": "Keep it at 124."},
+            "editorVersion": {"code": 's("bd*4")', "hash": "latest-hash"},
+        }
+
 
 def test_default_mock_agent_run_completes(project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "agent_runs", AgentRunManager())
@@ -247,6 +303,65 @@ def test_default_mock_agent_run_completes(project_paths: dict[str, Path], monkey
 
     assert current["status"] == "completed"
     assert current["finalChange"]["code"] == 's("bd")\n\n// Agent draft: Make the drums more energetic.\n'
+
+
+def test_cancel_agent_run_is_idempotent(project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="input-1",
+                            name="request_user_input",
+                            arguments={
+                                "questionId": "tempo",
+                                "question": "Keep the current tempo?",
+                                "options": [],
+                                "reason": "private ambiguity analysis",
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+    monkeypatch.setattr(
+        main,
+        "create_agent_service",
+        lambda *args, **kwargs: AgentService(provider, provider_name="test-provider", model="test-model"),
+    )
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Make the drums more energetic.",
+                "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                "applyMode": "manual",
+            },
+        )
+        run_id = started.json()["id"]
+        for _ in range(100):
+            current = client.get(f"/agent/runs/{run_id}").json()
+            if current["status"] == "needs_input":
+                break
+            time.sleep(0.01)
+
+        cancelled = client.post(f"/agent/runs/{run_id}/cancel")
+        repeated = client.post(f"/agent/runs/{run_id}/cancel")
+        rejected_input = client.post(
+            f"/agent/runs/{run_id}/input",
+            json={"questionId": "tempo", "answer": "Keep it at 124."},
+        )
+
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "cancelled"
+    assert rejected_input.status_code == 409
 
 
 def test_start_agent_run_rejects_empty_editor_code(project_paths: dict[str, Path]) -> None:

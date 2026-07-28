@@ -70,3 +70,4 @@ def test_runtime_prompt_requires_tool_driven_finalization_and_limited_clarificat
     assert "finalize_change" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "request_user_input" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "material ambiguity" in AGENT_RUNTIME_SYSTEM_PROMPT
+    assert "editorUpdate" in AGENT_RUNTIME_SYSTEM_PROMPT

@@ -158,6 +158,83 @@ def cancel_agent_run(run: AgentRun, *, now: int | None = None) -> AgentRun:
     return _rebuild_run(run, now=now, status="cancelled", pendingInput=None)
 
 
+def resume_agent_run(
+    run: AgentRun,
+    *,
+    question_id: str,
+    answer: str,
+    now: int | None = None,
+) -> AgentRun:
+    if run.status != "needs_input" or not run.pending_input:
+        raise AgentRuntimeTransitionError("Only paused Agent Runs may receive user input")
+    normalized_question_id = question_id.strip()
+    normalized_answer = answer.strip()
+    if not normalized_question_id or not normalized_answer:
+        raise AgentRuntimeTransitionError("Agent Run input requires a question and answer")
+    if run.pending_input.question_id != normalized_question_id:
+        raise AgentRuntimeTransitionError("Agent Run input does not match the pending question")
+    return _rebuild_run(
+        run,
+        now=now,
+        status="running",
+        pendingInput=None,
+        messages=[
+            *run.messages,
+            AgentMessage(
+                role="user",
+                content=json.dumps(
+                    {
+                        "userInput": {"questionId": normalized_question_id, "answer": normalized_answer},
+                        "editorVersion": run.editor_version.model_dump(by_alias=True),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            ),
+        ],
+    )
+
+
+def update_agent_run_editor_version(
+    run: AgentRun,
+    *,
+    base_hash: str,
+    editor_version: EditorVersion,
+    now: int | None = None,
+) -> AgentRun:
+    if run.status not in {"running", "needs_input"}:
+        raise AgentRuntimeTransitionError("Only active Agent Runs may receive editor updates")
+    if not base_hash.strip() or not editor_version.code.strip():
+        raise AgentRuntimeTransitionError("Agent Run editor updates require non-empty code and hashes")
+    if run.editor_version.hash != base_hash:
+        raise AgentRuntimeTransitionError("Agent Run editor update is stale")
+    if editor_version.hash == run.editor_version.hash:
+        if editor_version.code != run.editor_version.code:
+            raise AgentRuntimeTransitionError("Agent Run editor update reuses a hash for different code")
+        return run.model_copy(deep=True)
+    return _rebuild_run(
+        run,
+        now=now,
+        editorVersion=editor_version,
+        messages=[
+            *run.messages,
+            AgentMessage(
+                role="user",
+                content=json.dumps(
+                    {
+                        "editorUpdate": {
+                            "baseHash": base_hash,
+                            "editorVersion": editor_version.model_dump(by_alias=True),
+                        }
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            ),
+        ],
+    )
+
+
 def fail_agent_run(run: AgentRun, failure: AgentRunFailure, *, now: int | None = None) -> AgentRun:
     _require_running(run)
     return _rebuild_run(run, now=now, status="failed", failure=failure)

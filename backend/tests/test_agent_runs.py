@@ -7,7 +7,7 @@ import pytest
 
 from app.agent_runs import AgentRunManager
 from app.config import AgentRuntimeConfig
-from app.agent_runtime import build_run_budget
+from app.agent_runtime import AgentRuntimeTransitionError, build_run_budget
 from app.models import AgentMessage, AgentRunPublic, EditorVersion, ModelTurnRequest, ModelTurnResult, ToolCall
 from app.providers.base import AgentProvider, ProviderError
 from tests.fakes import ScriptedAgentProvider
@@ -167,6 +167,161 @@ async def test_manager_stops_for_input_and_projects_only_the_question() -> None:
     assert public.question is not None
     assert public.question.question == "Keep the current tempo?"
     assert "private ambiguity analysis" not in json.dumps(public.model_dump(by_alias=True))
+
+
+@pytest.mark.anyio
+async def test_manager_resumes_a_paused_run_with_the_latest_editor_context() -> None:
+    updates: list[AgentRunPublic] = []
+
+    async def record_update(update: AgentRunPublic) -> None:
+        updates.append(update)
+
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="input-1",
+                            name="request_user_input",
+                            arguments={
+                                "questionId": "tempo",
+                                "question": "Keep the current tempo?",
+                                "options": [],
+                                "reason": "private ambiguity analysis",
+                            },
+                        )
+                    ],
+                )
+            ),
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd*4")',
+                                "explanation": "Added a four-on-the-floor kick.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            ),
+        ]
+    )
+    manager = AgentRunManager(on_update=record_update)
+
+    started = await start_run(manager, provider)
+    paused = await manager.wait(started.id)
+    assert paused is not None
+    assert paused.status == "needs_input"
+
+    updated = await manager.update_editor(
+        started.id,
+        base_hash="editor-hash",
+        editor_version=EditorVersion(code='s("bd*4")', hash="latest-hash"),
+    )
+    assert updated is not None
+    assert updated.status == "needs_input"
+
+    with pytest.raises(AgentRuntimeTransitionError, match="original provider"):
+        await manager.resume(
+            started.id,
+            question_id="tempo",
+            answer="Keep it at 124.",
+            provider_name="other-provider",
+            model="test-model",
+            provider=provider,
+        )
+
+    resumed = await manager.resume(
+        started.id,
+        question_id="tempo",
+        answer="Keep it at 124.",
+        provider_name="test-provider",
+        model="test-model",
+        provider=provider,
+    )
+    completed = await manager.wait(started.id)
+
+    assert resumed is not None
+    assert resumed.status == "running"
+    assert completed is not None
+    assert completed.status == "completed"
+    assert [update.status for update in updates] == ["running", "needs_input", "running", "completed"]
+    assert json.loads(provider.requests[-1].messages[-1].content) == {
+        "userInput": {"questionId": "tempo", "answer": "Keep it at 124."},
+        "editorVersion": {"code": 's("bd*4")', "hash": "latest-hash"},
+    }
+
+
+@pytest.mark.anyio
+async def test_manager_restarts_an_active_turn_after_an_editor_update() -> None:
+    class SupersededTurnProvider:
+        def __init__(self) -> None:
+            self.requests: list[ModelTurnRequest] = []
+            self.first_turn_started = asyncio.Event()
+            self.first_turn_cancelled = False
+
+        async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            self.requests.append(request.model_copy(deep=True))
+            if len(self.requests) == 1:
+                self.first_turn_started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.first_turn_cancelled = True
+                    raise
+            return ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("hh")',
+                                "explanation": "Applied the latest editor context.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            )
+
+        async def test_connection(self) -> None:
+            return None
+
+    provider = SupersededTurnProvider()
+    manager = AgentRunManager()
+
+    started = await start_run(manager, provider)
+    await provider.first_turn_started.wait()
+    updated = await manager.update_editor(
+        started.id,
+        base_hash="editor-hash",
+        editor_version=EditorVersion(code='s("hh")', hash="latest-hash"),
+    )
+    completed = await manager.wait(started.id)
+
+    assert updated is not None
+    assert updated.status == "running"
+    assert completed is not None
+    assert completed.status == "completed"
+    assert provider.first_turn_cancelled is True
+    assert len(provider.requests) == 2
+    assert json.loads(provider.requests[-1].messages[-1].content) == {
+        "editorUpdate": {
+            "baseHash": "editor-hash",
+            "editorVersion": {"code": 's("hh")', "hash": "latest-hash"},
+        }
+    }
 
 
 @pytest.mark.anyio

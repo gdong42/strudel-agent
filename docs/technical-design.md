@@ -331,6 +331,16 @@ manager emits it when a Run enters `running` and whenever that public
 projection changes; tool-loop progress that remains internal does not produce
 browser events.
 
+`POST /agent/runs/:id/input` accepts the pending question ID and an answer. It
+recreates a short-lived provider worker from the browser's transient provider
+headers, which must resolve to the Run's original provider and model; the
+server never retains the API key while a Run is paused. The editor update
+endpoint requires `baseHash` plus a newer `editorVersion` for optimistic
+sequencing. A stale base hash is rejected. When a model turn is active, the
+update cooperatively cancels that turn, discards its result, and restarts
+against the latest private context. `cancel` cooperatively stops an active Run
+and is idempotent for terminal Runs.
+
 Concurrent editing becomes a run-context update. Before final staging, the
 browser and runtime compare editor hashes. A newer editor version is supplied to
 the active run, which reconciles and self-reviews again. The current fixed
