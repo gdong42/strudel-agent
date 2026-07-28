@@ -71,38 +71,6 @@ class ChangedRange(BaseModel):
     description: str
 
 
-class ReconciliationContext(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    base_code: str = Field(alias="baseCode")
-    previous_agent_code: str = Field(alias="previousAgentCode")
-    user_edit_diff: str = Field(alias="userEditDiff")
-    attempt: int = Field(ge=1, le=2)
-
-
-class ChangeRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    intent: str
-    current_code: str = Field(alias="currentCode")
-    apply_mode: Literal["manual", "auto"] = Field(default="manual", alias="applyMode")
-    reconciliation: ReconciliationContext | None = None
-
-
-class GeneratedChange(BaseModel):
-    code: str
-    explanation: str
-    action: Literal["apply", "noop"] = "apply"
-    warnings: list[ChangeWarning] = Field(default_factory=list)
-    ranges: list[ChangedRange] | None = None
-
-
-class AgentResult(GeneratedChange):
-    provider: str
-    model: str | None = None
-    latency_ms: int = Field(alias="latencyMs")
-
-
 class ChangeRecord(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -265,6 +233,51 @@ class AgentRunUsage(BaseModel):
     total_tokens: int = Field(default=0, alias="totalTokens", ge=0)
 
 
+AgentAuditEvent = Literal[
+    "run_started",
+    "input_requested",
+    "input_answered",
+    "run_completed",
+    "run_failed",
+    "run_cancelled",
+    "change_staged",
+    "change_undone",
+]
+
+
+class AuditTextFingerprint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    sha256: str = Field(min_length=64, max_length=64)
+    byte_count: int = Field(alias="byteCount", ge=0)
+
+
+class AgentAuditRecord(BaseModel):
+    """Durable, code-free audit event. This model is never a browser response."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    id: str = Field(min_length=1)
+    project_id: str = Field(alias="projectId")
+    session_id: str = Field(alias="sessionId")
+    run_id: str | None = Field(default=None, alias="runId")
+    occurred_at: int = Field(alias="occurredAt", ge=0)
+    event: AgentAuditEvent
+    status: AgentRunStatus | None = None
+    provider: str | None = None
+    model: str | None = None
+    usage: AgentRunUsage | None = None
+    intent: AuditTextFingerprint | None = None
+    question_id: str | None = Field(default=None, alias="questionId")
+    answer: AuditTextFingerprint | None = None
+    final_action: Literal["apply", "noop"] | None = Field(default=None, alias="finalAction")
+    final_explanation: str | None = Field(default=None, alias="finalExplanation")
+    final_warnings: list[ChangeWarning] = Field(default_factory=list, alias="finalWarnings")
+    change_id: str | None = Field(default=None, alias="changeId")
+    error_code: str | None = Field(default=None, alias="errorCode")
+    truncated: bool = False
+
+
 class AgentFinalChange(BaseModel):
     code: str = Field(min_length=1)
     explanation: str = Field(min_length=1)
@@ -307,6 +320,13 @@ class AgentRunEditorUpdateRequest(BaseModel):
     editor_version: EditorVersion = Field(alias="editorVersion")
 
 
+class AgentRunStageRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    base_hash: str = Field(alias="baseHash", min_length=1)
+    editor_version: EditorVersion = Field(alias="editorVersion")
+
+
 class AgentRun(BaseModel):
     """Internal runtime state. Do not serialize this model to browser clients."""
 
@@ -330,6 +350,7 @@ class AgentRun(BaseModel):
     failure: AgentRunFailure | None = None
     provider: str | None = None
     model: str | None = None
+    staged_change_id: str | None = Field(default=None, alias="stagedChangeId")
 
     @model_validator(mode="after")
     def validate_status_shape(self) -> "AgentRun":
@@ -345,6 +366,8 @@ class AgentRun(BaseModel):
             raise ValueError("Only needs_input runs may include pendingInput")
         if self.status != "failed" and self.failure:
             raise ValueError("Only failed runs may include failure")
+        if self.staged_change_id and self.status != "completed":
+            raise ValueError("Only completed Agent Runs may have a staged change")
         return self
 
     def to_public(self) -> "AgentRunPublic":

@@ -84,8 +84,13 @@ results, not assert a model's private reasoning.
 | `backend/app/models.py` | Pydantic `alias` serialization (camelCase ↔ snake_case), default values, validation |
 | `backend/app/agent_runtime.py` | Run transitions, tool loop, budgets, cancellation, pause/resume, finalization |
 | `backend/app/agent_runs.py` | Public projection, resumable state, candidate isolation |
-| `backend/app/prompt_contract.py` | Shared instructions and final-change schema |
-| `backend/app/tools/` | Tool argument validation, deterministic results, recoverable/fatal errors |
+| `backend/app/session_conversation.py` | Bounded record retention, safe model-context projection, and no-code/no-secret boundary |
+| `backend/app/run_audit.py` | Append-only event order, input fingerprints, safe final metadata, and no-code/no-secret persistence |
+| `backend/app/evaluations.py` | Scenario schema, fixture confinement, deterministic assessment, safe runner reports, fixed-rubric human review, and latest-per-scenario aggregation |
+| `backend/app/prompt_contract.py` | Shared Agent Runtime instructions |
+| `backend/app/project_context.py` | Optional context loading, project-root confinement, UTF-8, and size limits |
+| `backend/app/samples.py` | Versioned manifest validation, path confinement, missing-registry behavior, and stable declared-sound ordering |
+| `backend/app/tools/` | Tool argument validation, deterministic results, declared-sample lookup/inspection, and recoverable/fatal errors |
 | `backend/app/providers/` | Normalized model turns, tool calls, usage, and vendor error mapping |
 | `backend/app/tracks.py` | `read_track` / `write_track` round-trip, missing file behavior |
 | `backend/app/snapshots.py` | CRUD, list ordering, prune by count, prune by age |
@@ -120,6 +125,8 @@ results, not assert a model's private reasoning.
 | 6 | Turn/time/token budget is exhausted | Run becomes `failed`; no candidate is staged |
 | 7 | User cancels during model or tool work | Run becomes `cancelled`; editor/playback/history remain unchanged |
 | 8 | Provider/tool returns malformed data | Runtime records a sanitized failure or recoverable tool result without leaking credentials |
+| 9 | A Run contributes session conversation data | Only intent, public clarification, final explanation, and safe outcome enter bounded revision context; code, tools, credentials, and hidden reasoning do not |
+| 10 | A Run or Change lifecycle event is persisted | Audit links IDs and safe outcome metadata while excluding raw input, code, credentials, provider payloads, and hidden reasoning |
 
 ---
 
@@ -142,11 +149,13 @@ results, not assert a model's private reasoning.
 | `GET /snapshots` | Returns sorted list | Empty when no snapshots |
 | `POST /snapshots` | Creates snapshot, returns record | 400 on empty code |
 | `POST /snapshots/:id/revert` | Reverts track and returns snapshot | 404 on unknown id |
-| `POST /agent/runs` | Starts a run and returns public status | 400 on empty intent/code; provider config errors are sanitized |
+| `GET /samples` | Returns project-declared sample names and metadata | Missing registry is an empty unconfigured catalog; malformed registry returns a sanitized 400 |
+| `POST /agent/runs` | Starts a run and returns public status | 400 on empty intent/code, invalid project context, or provider configuration errors; private context is never public |
 | `GET /agent/runs/:id` | Returns public run projection | 404 on unknown id; excludes candidates/provider internals |
 | `POST /agent/runs/:id/input` | Resumes a `needs_input` run with the original provider/model | 409 for wrong run state, question, or provider/model |
-| `POST /agent/runs/:id/editor` | Supplies latest editor version with `baseHash` | Rejects terminal or stale sequencing; supersedes active model turn safely |
+| `POST /agent/runs/:id/editor` | Supplies latest editor version with ordered `baseHash` sequencing | Reopens an unpersisted completed stale final; rejects failed/cancelled/persisted or stale sequencing |
 | `POST /agent/runs/:id/cancel` | Cancels without staging | Idempotent terminal behavior |
+| `POST /agent/runs/:id/stage` | Persists one completed apply final after matching editor hash acknowledgement | Rejects no-op, non-completed, stale, mismatched-code, or mismatched-hash acknowledgements |
 | `GET /events` | Initial `track` event and public `agent-run` lifecycle payload | Queue cleanup/reconnect behavior and public-payload boundary covered by E2E/manual smoke |
 
 ### 4.3 Shared fixture
@@ -209,11 +218,12 @@ It should also dispatch the same `update` event expected by the app.
 | 7 | Same-code SSE echo after Evaluate | Status remains "Playing" instead of being overwritten by "Loaded" |
 | 8 | Panic button | Mock `stop()` called; status shows panic message |
 | 9 | Agent internally rejects and revises a candidate | Editor and diff stay unchanged until completed final result arrives |
-| 10 | Agent needs clarification | Only the question/options appear; answer resumes the same run |
+| 10 | Agent needs clarification | Only the question/options appear; selected or typed answer resumes the same run with the latest editor version |
 | 11 | User edits while run is active | Latest editor version reaches the run; stale candidate never overwrites it |
-| 12 | Run fails, exhausts budget, or is cancelled | Editor, playback, snapshot, and change history remain unchanged |
-| 13 | Completed Manual Fire run | One final change is staged with final diff/explanation; no evaluate call |
-| 14 | Completed Auto Fire run passes gates | Final change evaluates once; failed gates return to the agent or block completion |
+| 12 | Failed or budget-exhausted Run | Editor, playback, snapshot, and change history remain unchanged; agent controls recover |
+| 13 | Cancelled Run | Editor, playback, snapshot, and change history remain unchanged |
+| 14 | Completed Manual Fire run | One final change is staged with final diff/explanation; no evaluate call |
+| 15 | Completed Auto Fire run passes gates | Final change evaluates once; failed gates return to the agent or block completion |
 
 ### 5.4 Real REPL smoke tests
 
@@ -350,7 +360,25 @@ export default defineConfig({
 
 ---
 
-## 9. What Is NOT Automated
+## 9. Agent Evaluation Baseline
+
+`evals/scenarios/` is a version-controlled data set, validated by pytest but not
+run against a live provider as part of ordinary unit tests. Each scenario defines
+the final user-facing result, named code-region constraints, and a human review
+rubric. It does not prescribe hidden reasoning, intermediate candidates, or an
+exact source-code response.
+
+The deterministic assessor records terminal/action checks, marked-region checks,
+and the current non-performing validation gate without calling a provider. The
+provider-runner is exercised with scripted model turns and projects only safe
+loop/tool observations into a report. Human review is separate, limited to the
+scenario's fixed rubric, a numerical quality score, and readiness status; it has
+no free-text or candidate-code field. Persisted reports are checked for the same
+no-code/no-secret boundary, and aggregate assertions use the latest record per
+scenario. This preserves repeatability without pretending that groove,
+arrangement taste, or live-set suitability can be decided by a single assertion.
+
+## 10. What Is NOT Automated
 
 | Category | Why not automated | Verification cadence |
 |---|---|---|

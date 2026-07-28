@@ -92,6 +92,52 @@ def test_create_agent_run_initializes_private_context_and_budget() -> None:
     }
 
 
+def test_create_agent_run_keeps_project_context_in_the_private_system_message() -> None:
+    run = create_agent_run(
+        intent="make the drums more energetic",
+        editor_version=EditorVersion(code='s("bd")', hash="editor-hash"),
+        apply_mode="manual",
+        budget=build_run_budget(AgentRuntimeConfig(maxTurns=3, maxElapsedSeconds=20, maxTotalTokens=1000)),
+        provider="mock",
+        model="mock-model",
+        project_context="# Set\n\n- Keep the bass stable.",
+        now=100,
+        run_id="run-with-context",
+    )
+
+    assert "Keep the bass stable." in run.messages[0].content
+    assert "Keep the bass stable." not in run.to_public().model_dump_json()
+
+
+def test_create_agent_run_includes_prior_conversation_only_in_its_initial_private_input() -> None:
+    prior_context = [
+        {
+            "runId": "run-previous",
+            "intent": "Make the drums more energetic.",
+            "clarifications": [],
+            "outcome": {"status": "completed", "action": "apply", "explanation": "Added a kick."},
+        }
+    ]
+    run = create_agent_run(
+        intent="Add a hi-hat pattern.",
+        editor_version=EditorVersion(code='s("bd")', hash="editor-hash"),
+        apply_mode="manual",
+        budget=build_run_budget(AgentRuntimeConfig(maxTurns=3, maxElapsedSeconds=20, maxTotalTokens=1000)),
+        provider="mock",
+        model="mock-model",
+        conversation_context=prior_context,
+        now=100,
+        run_id="run-with-conversation",
+    )
+
+    assert json.loads(run.messages[1].content) == {
+        "intent": "Add a hi-hat pattern.",
+        "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+        "conversationContext": prior_context,
+    }
+    assert "conversationContext" in run.messages[0].content
+
+
 def test_append_model_turn_rebuilds_the_run_and_tracks_usage() -> None:
     original = make_run()
     updated = append_model_turn(
@@ -364,6 +410,8 @@ async def test_execute_model_turn_runs_tools_in_provider_order_and_returns_inter
     assert [tool.name for tool in provider.requests[0].tools] == [
         "inspect_diff",
         "validate_candidate",
+        "lookup_samples",
+        "inspect_sample_usage",
         "finalize_change",
         "request_user_input",
     ]

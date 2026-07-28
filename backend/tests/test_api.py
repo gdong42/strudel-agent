@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -12,17 +13,12 @@ from fastapi.testclient import TestClient
 import app.main as main
 from app.agent import AgentService
 from app.agent_runs import AgentRunManager
-from app.models import AgentMessage, AgentRunPublic, GeneratedChange, ModelTurnResult, ToolCall
-from app.providers.base import ProviderRequest
+from app.models import AgentMessage, AgentRunPublic, ModelTurnResult, ToolCall
+from app.run_audit import list_audit_records
 from tests.fakes import ScriptedAgentProvider
 
 
 app = main.app
-
-
-class EmptyCodeProvider:
-    async def create_change(self, request: ProviderRequest) -> GeneratedChange:
-        return GeneratedChange(code=" ", explanation="Invalid response")
 
 
 def test_get_track(project_paths: dict[str, Path]) -> None:
@@ -79,44 +75,65 @@ def test_state_uses_latest_snapshot_as_last_good(project_paths: dict[str, Path])
     assert response.json()["lastGoodCode"] == 's("hh")'
 
 
-def test_change_stage_latest_and_undo(project_paths: dict[str, Path]) -> None:
+def test_get_samples_returns_an_empty_catalog_when_no_registry_is_configured(project_paths: dict[str, Path]) -> None:
     client = TestClient(app)
-    staged = client.post(
-        "/changes",
-        json={"intent": "more groove", "currentCode": 's("bd")', "applyMode": "manual"},
+
+    response = client.get("/samples")
+
+    assert response.status_code == 200
+    assert response.json() == {"configured": False, "samples": []}
+
+
+def test_get_samples_returns_declared_project_sounds(project_paths: dict[str, Path]) -> None:
+    root = project_paths["track_path"].parent.parent
+    registry = root / "samples" / "registry.json"
+    registry.parent.mkdir()
+    registry.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sounds": [
+                    {"name": "house_hat", "tags": ["drum", "hat"]},
+                    {"name": "house_kick", "tags": ["drum", "kick"], "description": "Dry kick."},
+                ],
+            }
+        ),
+        encoding="utf-8",
     )
-    assert staged.status_code == 200
-    assert staged.json()["preAgentCode"] == 's("bd")'
-    assert "more groove" in staged.json()["code"]
-
-    latest = client.get("/changes/latest")
-    assert latest.json()["change"]["id"] == staged.json()["id"]
-
-    undone = client.post(f'/changes/{staged.json()["id"]}/undo')
-    assert undone.status_code == 200
-    assert undone.json()["code"] == 's("bd")'
-
-
-def test_change_rejects_empty_intent(project_paths: dict[str, Path]) -> None:
     client = TestClient(app)
-    response = client.post("/changes", json={"intent": " ", "currentCode": 's("bd")'})
+
+    response = client.get("/samples")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": True,
+        "samples": [
+            {"name": "house_hat", "tags": ["drum", "hat"], "description": None},
+            {"name": "house_kick", "tags": ["drum", "kick"], "description": "Dry kick."},
+        ],
+    }
+
+
+def test_get_samples_reports_an_invalid_registry_without_exposing_a_path(project_paths: dict[str, Path]) -> None:
+    root = project_paths["track_path"].parent.parent
+    registry = root / "samples" / "registry.json"
+    registry.parent.mkdir()
+    registry.write_text("not json", encoding="utf-8")
+    client = TestClient(app)
+
+    response = client.get("/samples")
+
     assert response.status_code == 400
+    assert response.json()["detail"] == "Could not load sample registry registry.json"
+    assert str(root) not in response.text
 
 
-def test_change_rejects_invalid_provider_response_without_persisting(
-    project_paths: dict[str, Path], monkeypatch
-) -> None:
-    monkeypatch.setattr(
-        "app.main.create_agent_service",
-        lambda *args, **kwargs: AgentService(EmptyCodeProvider()),
-    )
+def test_legacy_change_generation_endpoint_is_not_available(project_paths: dict[str, Path]) -> None:
     client = TestClient(app)
 
-    response = client.post("/changes", json={"intent": "change it", "currentCode": 's("bd")'})
+    response = client.post("/changes", json={"intent": "more groove", "currentCode": 's("bd")'})
 
-    assert response.status_code == 502
-    assert "empty Strudel code" in response.json()["detail"]
-    assert list(project_paths["changes_dir"].glob("*.json")) == []
+    assert response.status_code == 404
 
 
 def test_agent_settings_exposes_defaults_without_secrets(project_paths: dict[str, Path]) -> None:
@@ -303,6 +320,242 @@ def test_default_mock_agent_run_completes(project_paths: dict[str, Path], monkey
 
     assert current["status"] == "completed"
     assert current["finalChange"]["code"] == 's("bd")\n\n// Agent draft: Make the drums more energetic.\n'
+
+
+def test_start_agent_run_loads_project_context_without_exposing_it(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = project_paths["track_path"].parent.parent
+    context = "# Set\n\n- Keep the bass stable.\n"
+    (root / "agent-context.md").write_text(context, encoding="utf-8")
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd*4")',
+                                "explanation": "Added a four-on-the-floor kick.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+    monkeypatch.setattr(
+        main,
+        "create_agent_service",
+        lambda *args, **kwargs: AgentService(provider, provider_name="test-provider", model="test-model"),
+    )
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Make the drums more energetic.",
+                "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                "applyMode": "manual",
+            },
+        )
+        run_id = started.json()["id"]
+        current = started.json()
+        for _ in range(100):
+            current = client.get(f"/agent/runs/{run_id}").json()
+            if current["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+    assert started.status_code == 202
+    assert current["status"] == "completed"
+    assert context in provider.requests[0].messages[0].content
+    assert "Keep the bass stable." not in json.dumps(started.json())
+    assert "Keep the bass stable." not in json.dumps(current)
+
+
+def test_start_agent_run_rejects_an_unsafe_project_context_path(project_paths: dict[str, Path]) -> None:
+    root = project_paths["track_path"].parent.parent
+    (root / "project.config.json").write_text(
+        '{"agent":{"contextFile":"../outside.md"}}',
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/agent/runs",
+        json={
+            "intent": "Make the drums more energetic.",
+            "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+            "applyMode": "manual",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Project context file must stay inside the project root"
+
+
+def test_completed_agent_run_reopens_after_a_stale_editor_update(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-1",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd*4")',
+                                "explanation": "Added a four-on-the-floor kick.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            ),
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-2",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("hh*8")',
+                                "explanation": "Applied the latest editor context.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            ),
+        ]
+    )
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+    monkeypatch.setattr(
+        main,
+        "create_agent_service",
+        lambda *args, **kwargs: AgentService(provider, provider_name="test-provider", model="test-model"),
+    )
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Make the drums more energetic.",
+                "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                "applyMode": "manual",
+            },
+        )
+        run_id = started.json()["id"]
+        current = started.json()
+        for _ in range(100):
+            current = client.get(f"/agent/runs/{run_id}").json()
+            if current["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+        reopened = client.post(
+            f"/agent/runs/{run_id}/editor",
+            json={
+                "baseHash": "editor-hash",
+                "editorVersion": {"code": 's("hh*8")', "hash": "latest-hash"},
+            },
+        )
+        for _ in range(100):
+            current = client.get(f"/agent/runs/{run_id}").json()
+            if current["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "running"
+    assert current["finalChange"]["code"] == 's("hh*8")'
+    assert json.loads(provider.requests[-1].messages[-1].content) == {
+        "editorUpdate": {
+            "baseHash": "editor-hash",
+            "editorVersion": {"code": 's("hh*8")', "hash": "latest-hash"},
+        }
+    }
+
+
+def test_completed_agent_run_persists_only_after_stage_ack(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Make the drums more energetic.",
+                "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                "applyMode": "manual",
+            },
+        )
+        run_id = started.json()["id"]
+        current = started.json()
+        for _ in range(100):
+            current = client.get(f"/agent/runs/{run_id}").json()
+            if current["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+        assert current["status"] == "completed"
+        assert list(project_paths["changes_dir"].glob("*.json")) == []
+        final_code = current["finalChange"]["code"]
+        final_hash = hashlib.sha256(final_code.encode("utf-8")).hexdigest()
+
+        rejected = client.post(
+            f"/agent/runs/{run_id}/stage",
+            json={
+                "baseHash": "wrong-base-hash",
+                "editorVersion": {"code": final_code, "hash": final_hash},
+            },
+        )
+        staged = client.post(
+            f"/agent/runs/{run_id}/stage",
+            json={
+                "baseHash": "editor-hash",
+                "editorVersion": {"code": final_code, "hash": final_hash},
+            },
+        )
+        repeated = client.post(
+            f"/agent/runs/{run_id}/stage",
+            json={
+                "baseHash": "editor-hash",
+                "editorVersion": {"code": final_code, "hash": final_hash},
+            },
+        )
+        latest = client.get("/changes/latest")
+        undone = client.post(f'/changes/{staged.json()["id"]}/undo')
+
+    assert rejected.status_code == 409
+    assert staged.status_code == 201
+    assert staged.json()["preAgentCode"] == 's("bd")'
+    assert staged.json()["code"] == final_code
+    assert repeated.status_code == 201
+    assert repeated.json()["id"] == staged.json()["id"]
+    assert latest.status_code == 200
+    assert latest.json()["change"]["id"] == staged.json()["id"]
+    assert undone.status_code == 200
+    assert undone.json()["code"] == 's("bd")'
+    assert len(list(project_paths["changes_dir"].glob("*.json"))) == 1
+    [audit] = list_audit_records()
+    assert audit.event == "change_undone"
+    assert audit.change_id == staged.json()["id"]
+    assert final_code not in audit.model_dump_json()
 
 
 def test_cancel_agent_run_is_idempotent(project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:

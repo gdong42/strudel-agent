@@ -28,7 +28,7 @@
 
 ## Phase 3: Agent Staging and Diff
 
-- [x] **P3.1** Implement `POST /changes` endpoint (`backend/app/changes.py`)
+- [x] **P3.1** Implement staged-change persistence in `backend/app/changes.py`
 - [x] **P3.2** Implement `GET /changes/latest` and `POST /changes/:id/undo`
 - [x] **P3.3** Implement `src/client/agent.ts` panel (prompt input and apply controls)
 - [x] **P3.4** Wire agent stage flow: request → response → setCode in editor → show diff → wait
@@ -45,7 +45,7 @@
 - [x] **P4A.1** Define the async provider request/response contract and provider error type
 - [x] **P4A.2** Add agent service provider selection and response validation
 - [x] **P4A.3** Move deterministic generation into `MockProvider`
-- [x] **P4A.4** Route `POST /changes` through agent service before persistence
+- [x] **P4A.4** Route agent generation through provider selection before staging
 - [x] **P4A.5** Test provider mapping, invalid responses, selection, and API failure behavior
 
 ### Phase 4B.1: Provider Settings
@@ -93,39 +93,48 @@ workflow.
 - [x] **P4C.6.1a** Add an in-memory Run manager, worker loop, task ownership, and active-task credential confinement
 - [x] **P4C.6.2** Add start/read Run endpoints and public lifecycle events
 - [x] **P4C.6.3** Add input, editor-update, and cancel commands for active Runs
-- [ ] **P4C.7.1** Replace the client generation path with Run status handling and final-only Manual Fire staging
-- [ ] **P4C.7.2** Add an editor-hash stage acknowledgement that persists a change only after the final Run is accepted
-- [ ] **P4C.7.3** Enable Auto Fire only after accepted staging and deterministic finalization gates
-- [ ] **P4C.8** Return stale finals to the active Run on editor updates; delete `POST /changes` generation and the fixed client reconciliation loop
-- [ ] **P4C.9** Add runtime integration and Mock-REPL E2E coverage for loops, failures, cancellation, stale finals, and final-only staging
+- [x] **P4C.7.1** Replace the client generation path with Run status handling and final-only Manual Fire staging
+- [x] **P4C.7.2** Add an editor-hash stage acknowledgement that persists a change only after the final Run is accepted
+- [x] **P4C.7.3** Enable Auto Fire only after accepted staging and deterministic finalization gates
+- [x] **P4C.8.1** Stream debounced editor versions to active Runs with ordered base-hash sequencing
+- [x] **P4C.8.2** Keep a final stale until its latest editor update is reconciled; never overwrite a newer browser edit
+- [x] **P4C.8.3** Retire the legacy one-shot change generation path and fixed reconciliation contracts after Run migration coverage
+- [x] **P4C.9.1** Cover cancellation, stale finals, and final-only staging in Mock-REPL E2E
+- [x] **P4C.9.2** Cover failed terminal Runs in Mock-REPL E2E without editor, playback, or history mutation
 
 ### Phase 4D: Human-in-the-Loop Clarification
 
-- [ ] **P4D.1** Add `needs_input` question/option UI without exposing internal candidates or validation findings
-- [ ] **P4D.2** Resume the same Agent Run with the user's answer and latest editor version
-- [ ] **P4D.3** Test pause, reload/reconnect, answer, cancel, and resume behavior
+- [x] **P4D.1** Add `needs_input` question/option UI without exposing internal candidates or validation findings
+- [x] **P4D.2** Resume the same Agent Run with the user's answer and latest editor version
+- [x] **P4D.3.1** Restore an active public Run after browser reload without persisting credentials
+- [x] **P4D.3.2** Refresh the active Run after SSE reconnect and cover pause, answer, cancel, and resume behavior
 
 ### Phase 4E: Project Context
 
-- [ ] **P4E.1** Define the minimal `agent-context.md` format
-- [ ] **P4E.2** Load project context into each Agent Run with size and error handling
-- [ ] **P4E.3** Keep musical conventions in context and machine settings in config
+- [x] **P4E.1** Define the minimal `agent-context.md` format
+- [x] **P4E.2** Load project context into each Agent Run with size and error handling
+- [x] **P4E.3** Keep musical conventions in context and machine settings in config
 
 ### Phase 4F: Conversation and Revision
 
-- [ ] **P4F.1** Define session conversation state and retention boundaries
-- [ ] **P4F.2** Include recent requests, user clarifications, final explanations, and outcomes in revisions
-- [ ] **P4F.3** Persist run/change audit data without credentials, hidden reasoning, or discarded candidate code
+- [x] **P4F.1** Define session conversation state and retention boundaries
+- [x] **P4F.2** Include recent requests, user clarifications, final explanations, and outcomes in revisions
+- [x] **P4F.3** Persist run/change audit data without credentials, hidden reasoning, or discarded candidate code
 
 ### Phase 4G: Evaluation and Agent Tuning
 
-- [ ] **P4G.1** Build a baseline set of fixed musical capability scenarios immediately after the Run migration
-- [ ] **P4G.2** Record final syntax validity, constraint adherence, loop/tool behavior, and musical review results
-- [ ] **P4G.3** Tune agent instructions, tools, and budgets against the evaluation set
+- [x] **P4G.1** Build a baseline set of fixed musical capability scenarios immediately after the Run migration
+- [x] **P4G.2.1** Define an evaluation assessment contract and deterministic final/region checks
+- [x] **P4G.2.2** Execute a scenario through an Agent Run and capture terminal, loop, and tool observations
+- [x] **P4G.2.3** Add structured human musical review and aggregate evaluation reports
+- [ ] **P4G.3.1** Add an opt-in Provider baseline runner that accepts a one-time environment key and emits safe reports
+- [ ] **P4G.3.2** Run the selected Provider, complete human reviews, and tune instructions, tools, and budgets from measured results
 
 ## Phase 5: Validation and Performance Hardening
 
-- [ ] **P5.1** Implement `backend/app/samples.py` and expose sample lookup/validation as an internal agent tool
+- [x] **P5.1.1** Define a versioned local sample registry and project-confined loader
+- [x] **P5.1.2** Expose declared samples through a deterministic Agent lookup/validation tool
+- [x] **P5.1.3** Surface declared samples through the local API and workspace UI
 - [ ] **P5.2** Upgrade heuristic candidate checks with available Strudel syntax and mini-notation validation
 - [ ] **P5.3** Add richer visual and structural diff inspection tools for the agent's self-review
 - [ ] **P5.6** Add visual disable toggle and browser performance logging for audio-critical performance

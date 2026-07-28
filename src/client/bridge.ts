@@ -31,8 +31,24 @@ export interface SnapshotRevertPayload {
   track: TrackPayload;
 }
 
+export interface DeclaredSample {
+  name: string;
+  tags: string[];
+  description: string | null;
+}
+
+export interface SampleListPayload {
+  configured: boolean;
+  samples: DeclaredSample[];
+}
+
 export type ApplyMode = 'manual' | 'auto';
 export type AgentRunStatus = 'running' | 'needs_input' | 'completed' | 'failed' | 'cancelled';
+
+export interface EditorVersion {
+  code: string;
+  hash: string;
+}
 
 export interface ChangeWarning {
   level: 'info' | 'warn' | 'risk';
@@ -73,6 +89,27 @@ export interface AgentRunPublic {
   error: AgentRunFailure | null;
 }
 
+export interface AgentRunStartPayload {
+  intent: string;
+  editorVersion: EditorVersion;
+  applyMode: ApplyMode;
+}
+
+export interface AgentRunInputPayload {
+  questionId: string;
+  answer: string;
+}
+
+export interface AgentRunStagePayload {
+  baseHash: string;
+  editorVersion: EditorVersion;
+}
+
+export interface AgentRunEditorUpdatePayload {
+  baseHash: string;
+  editorVersion: EditorVersion;
+}
+
 export interface ChangeRecord {
   id: string;
   projectId: string;
@@ -89,20 +126,6 @@ export interface ChangeRecord {
   latencyMs: number | null;
   warnings: ChangeWarning[];
   undoneAt: number | null;
-}
-
-export interface ChangeRequestPayload {
-  intent: string;
-  currentCode: string;
-  applyMode: ApplyMode;
-  reconciliation?: ReconciliationPayload;
-}
-
-export interface ReconciliationPayload {
-  baseCode: string;
-  previousAgentCode: string;
-  userEditDiff: string;
-  attempt: number;
 }
 
 export interface ProviderInfo {
@@ -124,15 +147,28 @@ export interface AgentConnection {
   apiKey: string | null;
 }
 
-export function connectTrackEvents(onTrack: (payload: TrackPayload) => void, onError: () => void): EventSource {
+export function connectTrackEvents(
+  onTrack: (payload: TrackPayload) => void,
+  onError: () => void,
+  onAgentRun?: (payload: AgentRunPublic) => void,
+  onOpen?: () => void,
+): EventSource {
   const source = new EventSource('/events');
 
   source.addEventListener('track', (event) => {
     onTrack(JSON.parse(event.data) as TrackPayload);
   });
 
+  source.addEventListener('agent-run', (event) => {
+    onAgentRun?.(JSON.parse(event.data) as AgentRunPublic);
+  });
+
   source.addEventListener('error', () => {
     onError();
+  });
+
+  source.addEventListener('open', () => {
+    onOpen?.();
   });
 
   return source;
@@ -190,6 +226,14 @@ export async function fetchSnapshots(): Promise<SnapshotListPayload> {
   return response.json() as Promise<SnapshotListPayload>;
 }
 
+export async function fetchSamples(): Promise<SampleListPayload> {
+  const response = await fetch('/samples');
+  if (!response.ok) {
+    throw new Error(`Failed to load samples: ${response.status}`);
+  }
+  return response.json() as Promise<SampleListPayload>;
+}
+
 export async function revertSnapshot(snapshotId: string): Promise<SnapshotRevertPayload> {
   const response = await fetch(`/snapshots/${encodeURIComponent(snapshotId)}/revert`, {
     method: 'POST',
@@ -203,25 +247,82 @@ export async function revertSnapshot(snapshotId: string): Promise<SnapshotRevert
   return response.json() as Promise<SnapshotRevertPayload>;
 }
 
-export async function createChange(
-  payload: ChangeRequestPayload,
+export async function startAgentRun(
+  payload: AgentRunStartPayload,
   connection?: AgentConnection,
-  signal?: AbortSignal,
-): Promise<ChangeRecord> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (connection?.provider) headers['X-Agent-Provider'] = connection.provider;
-  if (connection?.model) headers['X-Agent-Model'] = connection.model;
-  if (connection?.apiKey) headers['X-Agent-Api-Key'] = connection.apiKey;
-  const response = await fetch('/changes', {
+): Promise<AgentRunPublic> {
+  const response = await fetch('/agent/runs', {
     method: 'POST',
-    headers,
+    headers: agentHeaders(connection),
     body: JSON.stringify(payload),
-    signal,
   });
   if (!response.ok) {
-    throw new Error(await responseError(response, `Failed to stage change: ${response.status}`));
+    throw new Error(await responseError(response, `Failed to start Agent Run: ${response.status}`));
+  }
+  return response.json() as Promise<AgentRunPublic>;
+}
+
+export async function fetchAgentRun(runId: string): Promise<AgentRunPublic> {
+  const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}`);
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Failed to read Agent Run: ${response.status}`));
+  }
+  return response.json() as Promise<AgentRunPublic>;
+}
+
+export async function answerAgentRun(
+  runId: string,
+  payload: AgentRunInputPayload,
+  connection?: AgentConnection,
+): Promise<AgentRunPublic> {
+  const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/input`, {
+    method: 'POST',
+    headers: agentHeaders(connection),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Failed to answer Agent Run: ${response.status}`));
+  }
+  return response.json() as Promise<AgentRunPublic>;
+}
+
+export async function cancelAgentRun(runId: string): Promise<AgentRunPublic> {
+  const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Failed to cancel Agent Run: ${response.status}`));
+  }
+  return response.json() as Promise<AgentRunPublic>;
+}
+
+export async function acknowledgeAgentRunStage(
+  runId: string,
+  payload: AgentRunStagePayload,
+): Promise<ChangeRecord> {
+  const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/stage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Failed to persist Agent Run stage: ${response.status}`));
   }
   return response.json() as Promise<ChangeRecord>;
+}
+
+export async function updateAgentRunEditor(
+  runId: string,
+  payload: AgentRunEditorUpdatePayload,
+  connection?: AgentConnection,
+): Promise<AgentRunPublic> {
+  const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/editor`, {
+    method: 'POST',
+    headers: agentHeaders(connection),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Failed to update Agent Run editor: ${response.status}`));
+  }
+  return response.json() as Promise<AgentRunPublic>;
 }
 
 export async function fetchAgentSettings(): Promise<AgentSettingsPayload> {
@@ -246,6 +347,14 @@ export async function undoChange(changeId: string): Promise<{ change: ChangeReco
     throw new Error((await response.text()) || `Failed to undo change: ${response.status}`);
   }
   return response.json() as Promise<{ change: ChangeRecord; code: string }>;
+}
+
+function agentHeaders(connection?: AgentConnection): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (connection?.provider) headers['X-Agent-Provider'] = connection.provider;
+  if (connection?.model) headers['X-Agent-Model'] = connection.model;
+  if (connection?.apiKey) headers['X-Agent-Api-Key'] = connection.apiKey;
+  return headers;
 }
 
 async function responseError(response: Response, fallback: string): Promise<string> {

@@ -1,0 +1,18 @@
+{
+  "id": "drums-only-groove",
+  "title": "Drums-only groove change",
+  "description": "The agent should make the rhythm more groovy without moving any non-drum musical role.",
+  "sourceFixture": "fixtures/house-four-base.strudel.js",
+  "projectContextFixture": "fixtures/house-context.md",
+  "intent": "Make the drums more groovy, but only change drums. Keep the bass, harmony, pad, and visuals exactly as they are.",
+  "expected": {
+    "terminalStatus": "completed",
+    "action": "apply",
+    "mustChangeRegions": ["drums"],
+    "mustPreserveRegions": ["bass", "harmony", "pad", "visuals"],
+    "review": [
+      "The groove gains syncopation or motion without losing the four-on-the-floor foundation.",
+      "The change remains plausible for a live house set at the existing tempo."
+    ]
+  }
+}

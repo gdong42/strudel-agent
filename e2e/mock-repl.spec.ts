@@ -152,6 +152,27 @@ test('snapshot list can revert to an earlier snapshot', async ({ page }) => {
   await expect(page.locator('#status')).toContainText('Reverted to snapshot');
 });
 
+test('sample panel renders declared project sounds without treating them as playback state', async ({ page }) => {
+  await page.route('**/samples', async (route) => {
+    await route.fulfill({
+      json: {
+        configured: true,
+        samples: [
+          { name: 'house_kick', tags: ['drum', 'kick'], description: 'Dry kick.' },
+          { name: 'house_hat', tags: ['drum', 'hat'], description: null },
+        ],
+      },
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.locator('#sample-list')).toContainText('house_kick');
+  await expect(page.locator('#sample-list')).toContainText('drum');
+  await expect(page.locator('#sample-list')).toContainText('Dry kick.');
+  await expect(page.locator('#sample-list')).not.toContainText('loaded');
+});
+
 test('panic calls stop and reports panic status', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Panic' }).click();
@@ -161,6 +182,27 @@ test('panic calls stop and reports panic status', async ({ page }) => {
 });
 
 test('manual agent change stages diff without evaluating and can be undone', async ({ page }) => {
+  const runRequests: Record<string, unknown>[] = [];
+  const stageRequests: Record<string, unknown>[] = [];
+  const deprecatedChangeGenerationRequests: string[] = [];
+  await page.route('**/agent/runs**', async (route) => {
+    if (/\/agent\/runs\/[^/]+\/stage$/.test(new URL(route.request().url()).pathname)) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    await route.continue();
+  });
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/agent/runs')) {
+      runRequests.push(JSON.parse(request.postData() ?? '{}') as Record<string, unknown>);
+    }
+    if (request.method() === 'POST' && /\/agent\/runs\/[^/]+\/stage$/.test(new URL(request.url()).pathname)) {
+      stageRequests.push(JSON.parse(request.postData() ?? '{}') as Record<string, unknown>);
+    }
+    if (request.method() === 'POST' && request.url().endsWith('/changes')) {
+      deprecatedChangeGenerationRequests.push(request.postData() ?? '');
+    }
+  });
+
   await page.goto('/');
   await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
   const before = await page.getByTestId('mock-editor').inputValue();
@@ -169,56 +211,185 @@ test('manual agent change stages diff without evaluating and can be undone', asy
 
   await expect(page.getByTestId('mock-editor')).toHaveValue(/Agent draft: make the drums tighter/);
   await expect(page.locator('#agent-diff')).toContainText('+ // Agent draft');
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  await expect(page.locator('#status')).toContainText('staged. Review it');
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect.poll(() => stageRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    intent: 'make the drums tighter',
+    applyMode: 'manual',
+    editorVersion: { code: before, hash: expect.any(String) },
+  });
+  expect(stageRequests[0]).toMatchObject({
+    baseHash: expect.any(String),
+    editorVersion: { code: expect.stringContaining('Agent draft: make the drums tighter'), hash: expect.any(String) },
+  });
+  expect(deprecatedChangeGenerationRequests).toHaveLength(0);
 
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByTestId('mock-editor')).toHaveValue(before);
 });
 
-test('auto fire evaluates a valid staged agent change', async ({ page }) => {
+test('Auto Fire evaluates only after the final Run stage is acknowledged', async ({ page }) => {
   await page.goto('/');
+  await expect(page.locator('#auto-fire')).toBeEnabled();
   await page.locator('#auto-fire').check();
   await page.locator('#agent-intent').fill('lift the energy');
   await page.getByRole('button', { name: 'Stage change' }).click();
 
   await expect(page.locator('#status')).toContainText('staged and playing');
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(1);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
 });
 
-test('agent automatically reconciles edits made while a change is generating', async ({ page }) => {
-  const requests: Record<string, unknown>[] = [];
-  await page.route('**/changes', async (route) => {
-    requests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
-    if (requests.length === 1) await new Promise((resolve) => setTimeout(resolve, 150));
+test('Auto Fire keeps a final with risk warnings staged for manual review', async ({ page }) => {
+  const finalCode = 's("bd*4")';
+  const completedRun = {
+    id: 'risk-run',
+    status: 'completed',
+    question: null,
+    finalChange: {
+      code: finalCode,
+      explanation: 'Added a kick with an unverified sample risk.',
+      action: 'apply',
+      warnings: [{ level: 'risk', message: 'Unverified sample.', category: 'sample' }],
+    },
+    error: null,
+  };
+  const stagedChange = {
+    id: 'risk-change', projectId: 'local-project', sessionId: 'local-session', createdAt: 1,
+    intent: 'add a risky kick', applyMode: 'auto', preAgentCode: 's("bd")', code: finalCode,
+    explanation: completedRun.finalChange.explanation, action: 'apply', provider: 'mock', model: null,
+    latencyMs: 1, warnings: completedRun.finalChange.warnings, undoneAt: null,
+  };
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(completedRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/risk-run') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(completedRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/risk-run/stage') {
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(stagedChange) });
+      return;
+    }
     await route.continue();
   });
 
   await page.goto('/');
   await page.locator('#auto-fire').check();
-  await page.locator('#agent-intent').fill('make the drums tighter');
+  await page.locator('#agent-intent').fill('add a risky kick');
   await page.getByRole('button', { name: 'Stage change' }).click();
-  await page.getByTestId('mock-editor').fill('s("user hats")');
 
-  await expect(page.locator('#status')).toContainText('reconciling');
-  await expect.poll(() => requests.length).toBe(2);
-  expect(requests[1]).toMatchObject({
-    currentCode: 's("user hats")',
-    reconciliation: {
-      baseCode: expect.any(String),
-      previousAgentCode: expect.stringContaining('Agent draft: make the drums tighter'),
-      userEditDiff: expect.stringContaining('user hats'),
-      attempt: 1,
-    },
-  });
-  await expect(page.getByTestId('mock-editor')).toHaveValue(/s\("user hats"\)[\s\S]*Agent draft: make the drums tighter/);
-  await expect(page.locator('#status')).toContainText('reconciled your latest edit');
+  await expect(page.getByTestId('mock-editor')).toHaveValue(finalCode);
+  await expect(page.locator('#status')).toContainText('Auto Fire blocked by risk warnings');
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
 });
 
-test('an in-flight agent request can be cancelled without changing the editor', async ({ page }) => {
-  await page.route('**/changes', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-    await route.abort();
+test('editor updates reach an active Agent Run in accepted-hash order', async ({ page }) => {
+  const runningRun = { id: 'sync-run', status: 'running', question: null, finalChange: null, error: null };
+  const editorUpdates: Array<{ baseHash: string; editorVersion: { code: string; hash: string } }> = [];
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/sync-run') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/sync-run/editor') {
+      editorUpdates.push(JSON.parse(request.postData() ?? '{}') as typeof editorUpdates[number]);
+      if (editorUpdates.length === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/sync-run/cancel') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...runningRun, status: 'cancelled' }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await page.locator('#agent-intent').fill('make a long transition');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByTestId('mock-editor').fill('s("first edit")');
+  await expect.poll(() => editorUpdates.length).toBe(1);
+  await page.getByTestId('mock-editor').fill('s("second edit")');
+  await expect.poll(() => editorUpdates.length).toBe(2);
+
+  expect(editorUpdates[0].editorVersion.code).toBe('s("first edit")');
+  expect(editorUpdates[1].baseHash).toBe(editorUpdates[0].editorVersion.hash);
+  expect(editorUpdates[1].editorVersion.code).toBe('s("second edit")');
+
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('#status')).toContainText('cancelled');
+});
+
+test('a stale completed Agent Run reconciles against a concurrent editor edit', async ({ page }) => {
+  let started = false;
+  const editorUpdates: Record<string, unknown>[] = [];
+  await page.route('**/agent/runs', async (route) => {
+    if (route.request().method() === 'POST') {
+      started = true;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    await route.continue();
+  });
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/agent\/runs\/[^/]+\/editor$/.test(new URL(request.url()).pathname)) {
+      editorUpdates.push(JSON.parse(request.postData() ?? '{}') as Record<string, unknown>);
+    }
+  });
+
+  await page.goto('/');
+  await page.locator('#agent-intent').fill('make the drums tighter');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+  await expect.poll(() => started).toBe(true);
+  await page.getByTestId('mock-editor').fill('s("user hats")');
+
+  await expect(page.locator('#status')).toContainText('staged. Review it');
+  await expect.poll(() => editorUpdates.length).toBe(1);
+  expect(editorUpdates[0]).toMatchObject({
+    editorVersion: { code: 's("user hats")', hash: expect.any(String) },
+  });
+  await expect(page.getByTestId('mock-editor')).toHaveValue(/s\("user hats"\)[\s\S]*Agent draft: make the drums tighter/);
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
+});
+
+test('an active Agent Run can be cancelled without changing the editor', async ({ page }) => {
+  const runningRun = { id: 'slow-run', status: 'running', question: null, finalChange: null, error: null };
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/slow-run') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/slow-run/cancel') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ...runningRun, status: 'cancelled' }),
+      });
+      return;
+    }
+    await route.continue();
   });
   await page.goto('/');
   await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
@@ -232,6 +403,207 @@ test('an in-flight agent request can be cancelled without changing the editor', 
   await expect(page.locator('#status')).toContainText('cancelled');
   await expect(page.getByTestId('mock-editor')).toHaveValue(before);
   await expect(page.getByRole('button', { name: 'Stage change' })).toBeEnabled();
+});
+
+test('a failed Agent Run leaves the editor and performance state unchanged', async ({ page }) => {
+  const runningRun = { id: 'failed-run', status: 'running', question: null, finalChange: null, error: null };
+  const failedRun = {
+    ...runningRun,
+    status: 'failed',
+    error: { code: 'provider_error', message: 'The provider is unavailable.', retryable: true },
+  };
+  const stageRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/stage')) {
+      stageRequests.push(request.postData() ?? '');
+    }
+  });
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/failed-run') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(failedRun) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
+  const before = await page.getByTestId('mock-editor').inputValue();
+  await page.locator('#agent-intent').fill('make the drums more intense');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.locator('#status')).toContainText('The provider is unavailable.');
+  await expect(page.getByTestId('mock-editor')).toHaveValue(before);
+  await expect(page.getByRole('button', { name: 'Stage change' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
+  expect(stageRequests).toHaveLength(0);
+});
+
+test('a paused Agent Run exposes only its clarification question and options', async ({ page }) => {
+  const pausedRun = {
+    id: 'clarify-run',
+    status: 'needs_input',
+    question: {
+      id: 'tempo',
+      question: 'Keep the current tempo?',
+      options: [
+        { id: 'keep', label: 'Keep it', description: 'Stay at 124 BPM.' },
+        { id: 'raise', label: 'Raise it', description: 'Move toward 128 BPM.' },
+      ],
+      reason: 'private ambiguity analysis',
+    },
+    finalChange: null,
+    error: null,
+    internalCandidate: 's("bd*4").gain(1.5)',
+  };
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(pausedRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/clarify-run') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pausedRun) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
+  const before = await page.getByTestId('mock-editor').inputValue();
+  await page.locator('#agent-intent').fill('make the drums more energetic');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.locator('#agent-question')).toBeVisible();
+  await expect(page.locator('#agent-question-text')).toHaveText('Keep the current tempo?');
+  await expect(page.locator('#agent-question-options')).toContainText('Keep it');
+  await expect(page.locator('#agent-question-options')).toContainText('Stay at 124 BPM.');
+  await expect(page.locator('#agent-question-options')).toContainText('Raise it');
+  await expect(page.getByTestId('mock-editor')).toHaveValue(before);
+  await expect(page.locator('body')).not.toContainText('private ambiguity analysis');
+  await expect(page.locator('body')).not.toContainText('gain(1.5)');
+});
+
+test('a clarification answer resumes the same Run after syncing the latest editor version', async ({ page }) => {
+  const pausedRun = {
+    id: 'answer-run',
+    status: 'needs_input',
+    question: {
+      id: 'tempo',
+      question: 'Keep the current tempo?',
+      options: [{ id: 'raise', label: 'Raise it', description: 'Move toward 128 BPM.' }],
+    },
+    finalChange: null,
+    error: null,
+  };
+  const runningRun = { ...pausedRun, status: 'running', question: null };
+  const commands: string[] = [];
+  const editorUpdates: Array<{ baseHash: string; editorVersion: { code: string; hash: string } }> = [];
+  const answers: Array<{ questionId: string; answer: string }> = [];
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(pausedRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/answer-run') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pausedRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/answer-run/editor') {
+      commands.push('editor');
+      editorUpdates.push(JSON.parse(request.postData() ?? '{}') as typeof editorUpdates[number]);
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pausedRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/answer-run/input') {
+      commands.push('input');
+      answers.push(JSON.parse(request.postData() ?? '{}') as typeof answers[number]);
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
+  await page.locator('#agent-intent').fill('make the drums more energetic');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+  await expect(page.locator('#agent-question')).toBeVisible();
+
+  await page.getByTestId('mock-editor').fill('s("user hats")');
+  await page.getByLabel('Raise it').check();
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  await expect.poll(() => commands).toEqual(['editor', 'input']);
+  expect(editorUpdates[0].editorVersion.code).toBe('s("user hats")');
+  expect(answers).toEqual([{ questionId: 'tempo', answer: 'Raise it' }]);
+  await expect(page.locator('#agent-question')).toBeHidden();
+  await expect(page.locator('#status')).toContainText('Agent is working');
+  await expect(page.getByTestId('mock-editor')).toHaveValue('s("user hats")');
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
+});
+
+test('a browser reload restores a paused Agent Run without storing credentials', async ({ page }) => {
+  const storedRun = {
+    id: 'reload-run',
+    intent: 'make the drums more energetic',
+    editorVersion: { code: 's("bd")', hash: 'stored-editor-hash' },
+    applyMode: 'manual',
+    autoFireArmed: false,
+  };
+  const pausedRun = {
+    id: 'reload-run',
+    status: 'needs_input',
+    question: {
+      id: 'tempo',
+      question: 'Keep the current tempo?',
+      options: [{ id: 'keep', label: 'Keep it', description: 'Stay at 124 BPM.' }],
+    },
+    finalChange: null,
+    error: null,
+  };
+  let runReads = 0;
+  await page.addInitScript((run) => {
+    sessionStorage.setItem('strudel-agent.active-run.v1', JSON.stringify(run));
+  }, storedRun);
+  await page.route('**/agent/runs/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'GET' && path === '/agent/runs/reload-run') {
+      runReads += 1;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pausedRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/reload-run/cancel') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...pausedRun, status: 'cancelled', question: null }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await expect(page.locator('#agent-question')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('#agent-question')).toBeVisible();
+  await expect.poll(() => runReads).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('strudel-agent.active-run.v1'))).not.toContain('apiKey');
+
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('#status')).toContainText('cancelled');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('strudel-agent.active-run.v1'))).toBeNull();
 });
 
 test('agent settings use backend defaults and persist browser overrides', async ({ page }) => {

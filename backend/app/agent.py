@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import time
-
 from .config import load_config
-from .models import AgentResult, ChangeRequest, ProviderInfo
-from .providers.base import OneShotAgentProvider, ProviderRequest
+from .models import ProviderInfo
+from .providers.base import AgentProvider
 from .providers.deepseek import DEFAULT_DEEPSEEK_MODEL, DeepSeekProvider
 from .providers.mock import MockProvider
 from .providers.openai import DEFAULT_OPENAI_MODEL, OpenAIProvider
@@ -14,37 +12,11 @@ class AgentConfigurationError(RuntimeError):
     pass
 
 
-class AgentResponseError(RuntimeError):
-    pass
-
-
 class AgentService:
-    def __init__(self, provider: OneShotAgentProvider, provider_name: str = "unknown", model: str | None = None) -> None:
+    def __init__(self, provider: AgentProvider, provider_name: str = "unknown", model: str | None = None) -> None:
         self.provider = provider
         self.provider_name = provider_name
         self.model = model
-
-    async def create_change(self, request: ChangeRequest) -> AgentResult:
-        started = time.monotonic()
-        generated = await self.provider.create_change(
-            ProviderRequest(
-                intent=request.intent.strip(),
-                current_code=request.current_code,
-                reconciliation=request.reconciliation,
-            )
-        )
-        if not generated.code.strip():
-            raise AgentResponseError("Provider returned empty Strudel code")
-        if not generated.explanation.strip():
-            raise AgentResponseError("Provider returned an empty explanation")
-        if generated.action == "noop" and generated.code != request.current_code:
-            raise AgentResponseError("Provider returned a no-op that changed Strudel code")
-        return AgentResult(
-            **generated.model_dump(),
-            provider=self.provider_name,
-            model=self.model,
-            latencyMs=round((time.monotonic() - started) * 1000),
-        )
 
     async def test_connection(self) -> None:
         await self.provider.test_connection()

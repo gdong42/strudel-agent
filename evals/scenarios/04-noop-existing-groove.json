@@ -1,0 +1,18 @@
+{
+  "id": "noop-existing-house-groove",
+  "title": "Recognize an already-satisfied request",
+  "description": "The agent should avoid a cosmetic rewrite when the performer explicitly says the current groove is already correct.",
+  "sourceFixture": "fixtures/house-four-base.strudel.js",
+  "projectContextFixture": "fixtures/house-context.md",
+  "intent": "The current 124 BPM house groove already meets the brief. Do not modify it.",
+  "expected": {
+    "terminalStatus": "completed",
+    "action": "noop",
+    "mustChangeRegions": [],
+    "mustPreserveRegions": ["drums", "bass", "harmony", "pad", "visuals"],
+    "review": [
+      "The final explanation correctly states that no musical change was needed.",
+      "The returned code is byte-for-byte identical to the source fixture."
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "brighten-pad-without-mud",
+  "title": "Brighten the pad",
+  "description": "The agent should improve pad brightness while preserving the low-end and established groove.",
+  "sourceFixture": "fixtures/house-four-base.strudel.js",
+  "projectContextFixture": "fixtures/house-context.md",
+  "intent": "Make the ambient pad brighter and less muddy. Keep the bass and drums unchanged.",
+  "expected": {
+    "terminalStatus": "completed",
+    "action": "apply",
+    "mustChangeRegions": ["pad"],
+    "mustPreserveRegions": ["drums", "bass", "harmony", "visuals"],
+    "review": [
+      "The pad sounds lighter or higher without crowding the bass range.",
+      "The change supports the existing late-night house mood."
+    ]
+  }
+}

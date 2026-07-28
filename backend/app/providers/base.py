@@ -1,25 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ..models import GeneratedChange, ModelTurnRequest, ModelTurnResult, ReconciliationContext
-
-
-@dataclass(frozen=True)
-class ProviderRequest:
-    intent: str
-    current_code: str
-    reconciliation: ReconciliationContext | None = None
-
-
-class OneShotAgentProvider(Protocol):
-    async def create_change(self, request: ProviderRequest) -> GeneratedChange:
-        """Transitional interface for the current one-shot generation path."""
-
-    async def test_connection(self) -> None:
-        """Raise ProviderError when the provider is not ready for requests."""
+from ..models import ModelTurnRequest, ModelTurnResult
 
 
 class AgentProvider(Protocol):

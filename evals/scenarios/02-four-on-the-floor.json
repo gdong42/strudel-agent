@@ -1,0 +1,18 @@
+{
+  "id": "four-on-the-floor-house",
+  "title": "Four-on-the-floor kick",
+  "description": "The agent should convert a sparse kick into a stable house pulse while preserving the rest of the arrangement.",
+  "sourceFixture": "fixtures/house-base.strudel.js",
+  "projectContextFixture": "fixtures/house-context.md",
+  "intent": "Set the kick to four-on-the-floor at the current 124 BPM. Do not change bass, harmony, pad, or visuals.",
+  "expected": {
+    "terminalStatus": "completed",
+    "action": "apply",
+    "mustChangeRegions": ["drums"],
+    "mustPreserveRegions": ["bass", "harmony", "pad", "visuals"],
+    "review": [
+      "Every beat has a clear kick pulse.",
+      "The resulting rhythm feels like house rather than a generic straight loop."
+    ]
+  }
+}

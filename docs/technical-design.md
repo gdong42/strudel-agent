@@ -201,16 +201,16 @@ provider metadata. The runtime, not the adapter, decides whether to execute a
 tool, continue the loop, pause for user input, fail, or accept a finalized
 change.
 
-The current `create_change()` adapters are a transitional one-shot
-implementation. They remain usable while P4C introduces `next_turn()` and moves
-generation control into the runtime.
+The Run API is the only generation path. A completed Run produces a final change
+only after the runtime has finished its internal loop; the browser stages that
+final with an explicit acknowledgement. `/changes` is change-history storage,
+not a second model-generation interface.
 
 This repository is in active development, not a released compatibility surface.
-When the Run API reaches the browser, it replaces the one-shot generation path
-directly: the generation form of `POST /changes` and the fixed client-side
-reconciliation loop are removed rather than preserved behind adapters or data
-migrations. Existing change-history and snapshot data are development fixtures,
-not an API compatibility constraint.
+The retired one-shot generation endpoint and its fixed client-side
+reconciliation contract are not preserved behind adapters or migrations.
+Existing change-history and snapshot data are development fixtures, not an API
+compatibility constraint.
 
 Current providers remain direct API integrations:
 
@@ -225,9 +225,8 @@ handling remain unchanged.
 
 ### 6.4 Agent Instructions And Tools
 
-`backend/app/prompt_contract.py` owns the vendor-neutral system prompt, JSON
-input conventions, and final-change schema. As the runtime becomes tool-driven,
-the prompt instructs the model to pursue the user's intent, use available tools
+`backend/app/prompt_contract.py` owns the vendor-neutral runtime instructions.
+The prompt instructs the model to pursue the user's intent, use available tools
 to inspect and validate its work, revise recoverable problems internally, and
 finish only when it judges the result ready.
 
@@ -308,6 +307,7 @@ GET  /agent/runs/:id             Read public run status
 POST /agent/runs/:id/input       Answer a needs_input question
 POST /agent/runs/:id/editor      Supply a newer editor version to the run
 POST /agent/runs/:id/cancel      Cancel the run
+POST /agent/runs/:id/stage       Persist a browser-acknowledged completed final
 GET  /events                     Stream public run status and final results
 ```
 
@@ -321,25 +321,97 @@ class AgentRunPublic(BaseModel):
 ```
 
 The public representation excludes internal candidates, recoverable findings,
-raw provider messages, and hidden reasoning. Run audit records may retain user
-messages, tool names, tool outcomes, usage, final result, and provider metadata,
-but never credentials or hidden chain-of-thought.
+raw provider messages, and hidden reasoning.
+
+#### 6.6.1 Session Conversation Context
+
+One local backend session owns a bounded, in-memory conversation ledger. It is
+not a chatbot transcript and it is not the private `AgentRun.messages` list.
+Each completed, paused, failed, or cancelled Run may contribute only these
+user-meaningful fields:
+
+- Run ID and timestamps.
+- The user's requested intent.
+- A public clarification question and the user's answer, when present.
+- Terminal status plus the finalized action, explanation, and warnings when a
+  final exists.
+- A linked staged change ID or a safe terminal error code, when applicable.
+
+The ledger never copies editor code, final code, discarded candidates, tool
+arguments or outputs, raw provider messages, project-context contents,
+credentials, or hidden reasoning. Current editor code remains the authoritative
+musical source for every Run; change/snapshot storage remains the sole durable
+code history.
+
+The initial implementation keeps at most the newest 12 eligible Run records and
+16 KiB of serialized conversation data. It evicts oldest complete records first
+and marks a truncated record rather than silently changing its meaning. Those
+are operational bounds to tune with evaluation data, not musical constraints.
+
+The ledger lives only for the lifetime of the local backend process. It survives
+a browser reload while that process remains available, but it is not written to
+browser storage and is cleared on server restart. A future explicit "clear
+conversation" action must clear this ledger before a new Run starts.
+
+When a new Run starts, the runtime adds a snapshot of the recent eligible
+records to its initial private model context, followed by the new intent and
+latest editor version. The active Run never uses its own in-progress candidates
+as conversation context.
+
+#### 6.6.2 Persistent Audit Boundary
+
+P4F.3 writes a separate, append-only event log under `audits/` for lifecycle and
+recovery correlation. Events retain run/change IDs, timestamps, status,
+provider/model, usage totals, final action/explanation/warnings, linked change
+ID, and safe error code. They do not persist raw intent or clarification text:
+the app cannot reliably distinguish a user-pasted secret from ordinary
+natural-language input. The log retains a SHA-256 fingerprint and byte count
+for those inputs when correlation is needed.
+
+Audit records likewise exclude API keys, project context, editor/final/candidate
+code, tool outputs, raw provider requests/responses, and hidden reasoning. They
+are not automatically replayed into the model after a server restart. Accepted
+change records remain separate because recovery requires their approved code;
+the audit log never copies that content.
 
 `GET /events` retains the existing `track` event and adds an `agent-run` event.
 Each `agent-run` payload is exactly an `AgentRunPublic` projection. The Run
 manager emits it when a Run enters `running` and whenever that public
 projection changes; tool-loop progress that remains internal does not produce
-browser events.
+browser events. When the SSE connection opens or reconnects, the browser also
+refreshes its active Run by ID so a pause or terminal state is not missed while
+the stream was unavailable.
 
 `POST /agent/runs/:id/input` accepts the pending question ID and an answer. It
 recreates a short-lived provider worker from the browser's transient provider
 headers, which must resolve to the Run's original provider and model; the
-server never retains the API key while a Run is paused. The editor update
+server never retains the API key while a Run is paused. Before sending an
+answer, the browser flushes the latest editor version through the ordered editor
+update command, so the resumed turn uses that accepted version. The editor update
 endpoint requires `baseHash` plus a newer `editorVersion` for optimistic
 sequencing. A stale base hash is rejected. When a model turn is active, the
 update cooperatively cancels that turn, discards its result, and restarts
 against the latest private context. `cancel` cooperatively stops an active Run
-and is idempotent for terminal Runs.
+and is idempotent for terminal Runs. During browser stale-final reconciliation,
+cancel also discards an unpersisted completed final so it cannot be reopened.
+
+If a completed final reaches the browser after the editor has changed, the same
+endpoint reopens that unpersisted Run with the latest editor version. The
+browser supplies its transient provider headers only for this restart, and the
+runtime requires the Run's original provider and model before it starts a new
+worker.
+
+While a Run is active, the browser debounces direct editor changes and sends at
+most one editor update at a time. Changes made during that request coalesce to
+the latest version; the next request uses the hash accepted by the preceding
+request as its `baseHash`.
+
+`POST /agent/runs/:id/stage` is a browser acknowledgement, not an extra user
+acceptance step. After the client has written a completed `apply` final into the
+editor, it sends the original base hash and the final editor version. The server
+checks both hashes and exact final code before writing one `ChangeRecord`; a
+repeated acknowledgement returns the same record. Candidates, no-ops, failed
+Runs, and stale finals never enter change history.
 
 Concurrent editing becomes a run-context update. Before final staging, the
 browser and runtime compare editor hashes. A newer editor version is supplied to
@@ -373,10 +445,14 @@ editing.
 | `backend/app/changes.py` | Persist, list, and undo completed final changes only |
 | `backend/app/agent_runtime.py` | Agent Run lifecycle, budgets, model turns, pause/resume, and finalization |
 | `backend/app/agent_runs.py` | In-memory Run state, worker task ownership, cancellation, and public projections |
+| `backend/app/session_conversation.py` | Bounded, in-memory summaries used only as revision context |
+| `backend/app/run_audit.py` | Best-effort, append-only safe lifecycle and change audit events |
+| `backend/app/evaluations.py` | Version-controlled evaluation scenario schema and fixture validation |
 | `backend/app/prompt_contract.py` | Shared agent instructions and final-change schema |
+| `backend/app/project_context.py` | Bounded, project-root-confined loading of optional musical context |
 | `backend/app/tools/` | Tool registry and deterministic tool implementations |
 | `backend/app/providers/` | Vendor-specific model-turn and tool-call adapters |
-| `backend/app/samples.py` | Sample registry used by internal validation tools |
+| `backend/app/samples.py` | Project-confined, versioned declared-sample registry loader |
 | `backend/app/config.py` | Load and watch `project.config.json` |
 
 ### 7.2 Client Modules
@@ -411,7 +487,7 @@ POST /changes/:id/undo           Undo a staged change (restore preAgentCode)
 GET  /snapshots                  List snapshots
 POST /snapshots                  Create snapshot after successful evaluate
 POST /snapshots/:id/revert       Revert to a snapshot
-GET  /samples                    List known samples
+GET  /samples                    List declared project samples (not live load state)
 ```
 
 ## 9. File Layout (Revisited)
@@ -425,6 +501,9 @@ GET  /samples                    List known samples
 │   │   ├── main.py
 │   │   ├── agent_runtime.py
 │   │   ├── agent_runs.py
+│   │   ├── session_conversation.py
+│   │   ├── run_audit.py
+│   │   ├── evaluations.py
 │   │   ├── prompt_contract.py
 │   │   ├── changes.py
 │   │   ├── tracks.py
@@ -460,9 +539,12 @@ GET  /samples                    List known samples
 │   └── main.strudel.js
 ├── snapshots/
 ├── changes/
+├── audits/
 ├── samples/
 ├── project.config.json
-├── agent-context.md
+├── agent-context.example.md
+├── agent-context.md             # optional project conventions
+├── evals/
 ├── TODO.md
 ├── docs/
 │   ├── live-vibe-coding-plan.md
@@ -509,6 +591,29 @@ sent to the backend for the duration of an individual request; the backend must
 not persist or return them. A hosted deployment may use platform credentials when
 the browser does not supply a user key.
 
+`agent.contextFile` is only a project-relative file locator. Musical conventions
+live in that Markdown file, while `project.config.json` retains machine and
+runtime defaults such as provider, model, budgets, sample registry, and server
+binding. Browser-local settings remain the source for a user's API key and
+temporary provider/model override.
+
+`samples.registryPath` names a project-relative directory containing optional
+`registry.json`. The registry contains declared Strudel sound names, tags, and
+short descriptions. It is neither a sample downloader nor a claim that browser
+audio has already loaded a name. The runtime rejects paths that escape the
+project root, including through a symlink. An absent registry is an empty,
+unconfigured catalog rather than an error.
+
+The local `GET /samples` endpoint and workspace Samples panel expose the same
+declared catalog without returning filesystem paths. The internal
+`lookup_samples` tool searches that catalog. The internal `inspect_sample_usage`
+tool compares direct `s()`/`sound()` names in a base and candidate, reporting
+only names newly introduced by the candidate and whether they are declared. It
+is advisory self-review data: the Agent repairs unambiguous undeclared names
+internally, while final runtime availability still belongs to the REPL evaluation
+boundary. The tool deliberately does not scan `.s()` instrument selection, so
+native synth selection is not misclassified as a project sample declaration.
+
 Runtime limits are operational guardrails, not a hardcoded task plan. The agent
 still chooses which tools to call and when to revise; the limits only prevent
 unbounded cost and latency. Values are initial defaults and should be tuned with
@@ -516,30 +621,69 @@ evaluation data.
 
 ## 11. agent-context.md Format
 
-A user-editable markdown file injected into the agent's system prompt. Expected sections:
+A project may provide an optional UTF-8 Markdown file for durable musical
+conventions. `agent.contextFile` locates it relative to the project root and
+defaults to `agent-context.md`. The file has no frontmatter, schema, or required
+headings: it is deliberately a small, human-authored piece of context rather
+than another configuration system.
+
+Use it for facts and conventions that should survive across Agent Runs, such as
+the set's musical direction, established instrument roles, arrangement language,
+available samples, or things that must remain unchanged. It is not the place for
+provider selection, models, runtime budgets, ports, API keys, or browser
+preferences; those remain in `project.config.json` or browser-local settings.
+
+The runtime loads one snapshot, capped at 16 KiB, when a Run starts and supplies
+it to the model as project data. It does not expose that private context through
+public Run state or change history. A missing context file means the project has
+no extra context; an unreadable, unsafe, non-UTF-8, or oversized configured file
+prevents a Run from starting with a clear error.
+
+`agent-context.example.md` is a starting point only. Projects may copy and edit
+it, or write a completely different Markdown document. For example:
 
 ```markdown
-# Project Context
+# Current Set
 
-## Musical Style
-(BPM range, genre, mood, preferred keys/scales)
-
-## Instrument Roles
-- drums: (what samples, typical patterns)
-- bass: (synth type, range, role)
-- chords: (voicing preferences)
-- pad: (texture role)
-- lead: (when to use, what synth)
-- fx: (reverb, delay, filter preferences)
-
-## Arrangement Conventions
-(section markers, transition patterns, energy curve)
-
-## Constraints
-(things the agent should never change, sample name conventions)
+- This is a warm, driving house set at 124 BPM.
+- Keep the kick four-on-the-floor and leave the bass role intact unless asked.
+- Chords should be spacious; pads should stay above the bass range.
+- Prefer the samples already named in the track.
 ```
 
-## 12. Testing Strategy
+## 12. Evaluation Baseline
+
+`evals/` contains a fixed, version-controlled capability baseline. Each scenario
+names a source Strudel fixture, optional project-context and concurrent-editor
+fixtures, performer intent, expected terminal state/action, named regions that
+must change or remain unchanged, and a short human musical-review rubric.
+
+The fixture regions are marked in comments so deterministic checks can compare
+the final code without requiring one exact generated implementation. The
+baseline covers drums-only scope, four-on-the-floor rhythm, pad brightness and
+low-end preservation, no-op recognition, material ambiguity, and concurrent
+editor reconciliation.
+
+Scenario loading and deterministic assessment are tested without making model
+calls. The assessment checks terminal/action expectations, marked code regions,
+and the current non-performing `validate_candidate` gate. Its syntax-valid field
+means that gate passed, not that a full Strudel compiler has accepted the code.
+P4G.2.2 executes a scenario through an explicitly supplied provider in an
+isolated Agent Run and records safe terminal, usage, editor-update, and
+tool-name/status/error-code observations. P4G.2.3 adds separately entered human
+musical review: every version-controlled rubric item is marked `met`, `partial`,
+`not_met`, or `not_applicable`, with an optional 1–5 musical-quality score and a
+performance-readiness outcome. There is deliberately no free-text field.
+
+Reviewed reports are append-only JSON files under ignored `evals/results/`.
+They retain safe report metadata and structured human outcomes, never source or
+candidate code, raw tool output, provider credentials, or hidden reasoning.
+Aggregate reporting uses the latest reviewed record per scenario while retaining
+the raw record history, so repeated tuning runs cannot inflate apparent baseline
+coverage. Intermediate candidates and hidden reasoning are neither evaluation
+inputs nor outputs.
+
+## 13. Testing Strategy
 
 ### Automated
 
@@ -567,7 +711,7 @@ A user-editable markdown file injected into the agent's system prompt. Expected 
 | Auto Fire validation | Confirm only completed, current, deterministic-gate-passing results can auto-evaluate |
 | Panic flow | Confirm panic stops audio, clears visuals, confirms before reload |
 
-## 13. Current Target Decisions
+## 14. Current Target Decisions
 
 Current implementation decisions:
 

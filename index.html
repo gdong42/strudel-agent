@@ -32,6 +32,16 @@
             <label class="auto-fire"><input id="auto-fire" type="checkbox"> Auto Fire</label>
             <div class="agent-actions"><button id="stage-change" type="submit">Stage change</button><button id="cancel-change" type="button" hidden>Cancel</button><button id="undo-change" type="button" disabled>Undo</button></div>
           </form>
+          <section id="agent-question" class="agent-question" aria-live="polite" hidden>
+            <form id="agent-question-form">
+              <fieldset class="agent-question-fieldset">
+                <legend id="agent-question-text"></legend>
+                <div id="agent-question-options" class="agent-question-options" role="radiogroup"></div>
+                <textarea id="agent-question-answer" rows="2" aria-label="Clarification answer" placeholder="Your response"></textarea>
+              </fieldset>
+              <div class="agent-question-actions"><button id="agent-question-submit" type="submit" disabled>Continue</button></div>
+            </form>
+          </section>
           <p class="provider-summary">Provider: <span id="agent-provider-summary">loading...</span></p>
           <p id="agent-explanation">No staged agent change.</p>
           <div id="agent-warnings" aria-live="polite"></div>
@@ -40,6 +50,8 @@
         <h2>Track</h2>
         <p><code>tracks/main.strudel.js</code></p>
         <p>Evaluate fires the Strudel REPL, then saves a snapshot only if evaluation succeeds.</p>
+        <h2>Samples</h2>
+        <div id="sample-list" class="sample-list" aria-live="polite"></div>
         <h2>Snapshots</h2>
         <div id="snapshot-list" class="snapshot-list" aria-live="polite">No snapshots yet.</div>
       </aside>

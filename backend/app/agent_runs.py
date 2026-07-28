@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -9,13 +10,18 @@ from .agent_runtime import (
     AgentRuntimeTransitionError,
     cancel_agent_run,
     create_agent_run,
+    discard_unstaged_completed_agent_run,
     execute_model_turn,
     fail_agent_run,
+    reopen_completed_agent_run,
     resume_agent_run,
     update_agent_run_editor_version,
 )
-from .models import AgentRun, AgentRunBudget, AgentRunFailure, AgentRunPublic, EditorVersion
+from .changes import create_change_from_agent_run, read_change
+from .models import AgentRun, AgentRunBudget, AgentRunFailure, AgentRunPublic, ChangeRecord, EditorVersion
 from .providers.base import AgentProvider
+from .run_audit import AgentAuditLog
+from .session_conversation import SessionConversation
 from .tools import ToolRegistry
 
 
@@ -40,9 +46,13 @@ class AgentRunManager:
         self,
         tools: ToolRegistry | None = None,
         on_update: RunUpdateListener | None = None,
+        conversation: SessionConversation | None = None,
+        audit_log: AgentAuditLog | None = None,
     ) -> None:
         self._tools = tools or ToolRegistry()
         self._on_update = on_update
+        self._conversation = conversation or SessionConversation()
+        self._audit_log = audit_log
         self._entries: dict[str, _RunEntry] = {}
         self._entries_lock = asyncio.Lock()
 
@@ -56,7 +66,9 @@ class AgentRunManager:
         provider_name: str,
         model: str,
         provider: AgentProvider,
+        project_context: str | None = None,
     ) -> AgentRun:
+        conversation_context = self._conversation.model_context()
         run = create_agent_run(
             intent=intent,
             editor_version=editor_version,
@@ -64,10 +76,15 @@ class AgentRunManager:
             budget=budget,
             provider=provider_name,
             model=model,
+            project_context=project_context,
+            conversation_context=conversation_context,
         )
         entry = _RunEntry(run=run)
         async with self._entries_lock:
             self._entries[run.id] = entry
+        self._conversation.record_started(run)
+        if self._audit_log:
+            self._audit_log.record_started(run)
         await self._start_worker(entry, provider, run)
         return run.model_copy(deep=True)
 
@@ -105,6 +122,9 @@ class AgentRunManager:
             entry.cancel_requested = False
             entry.cancellation = AgentRunCancellation()
             resumed = entry.run.model_copy(deep=True)
+            self._conversation.record_answer(run_id, question_id, answer)
+            if self._audit_log:
+                self._audit_log.record_answer(resumed, question_id, answer.strip())
             self._create_worker(entry, provider, resumed, start_gate)
 
         try:
@@ -138,6 +158,77 @@ class AgentRunManager:
                 entry.cancellation.cancel()
             return updated.model_copy(deep=True)
 
+    async def reopen_completed(
+        self,
+        run_id: str,
+        *,
+        base_hash: str,
+        editor_version: EditorVersion,
+        provider_name: str,
+        model: str,
+        provider: AgentProvider,
+    ) -> AgentRun | None:
+        entry = await self._entry(run_id)
+        if not entry:
+            return None
+
+        start_gate = asyncio.Event()
+        async with entry.lock:
+            if entry.run.provider != provider_name or entry.run.model != model:
+                raise AgentRuntimeTransitionError("Agent Run must reopen with its original provider and model")
+            entry.run = reopen_completed_agent_run(
+                entry.run,
+                base_hash=base_hash,
+                editor_version=editor_version,
+            )
+            entry.revision += 1
+            entry.cancel_requested = False
+            entry.cancellation = AgentRunCancellation()
+            reopened = entry.run.model_copy(deep=True)
+            self._create_worker(entry, provider, reopened, start_gate)
+
+        try:
+            await self._publish(reopened)
+        finally:
+            start_gate.set()
+        return reopened
+
+    async def acknowledge_stage(
+        self,
+        run_id: str,
+        *,
+        base_hash: str,
+        editor_version: EditorVersion,
+    ) -> ChangeRecord | None:
+        entry = await self._entry(run_id)
+        if not entry:
+            return None
+
+        async with entry.lock:
+            run = entry.run
+            if run.status != "completed" or not run.final_change:
+                raise AgentRuntimeTransitionError("Only completed Agent Runs may be staged")
+            if run.final_change.action != "apply":
+                raise AgentRuntimeTransitionError("Only completed apply Agent Runs may be staged")
+            if run.editor_version.hash != base_hash:
+                raise AgentRuntimeTransitionError("Agent Run stage acknowledgement is stale")
+            if run.final_change.code != editor_version.code:
+                raise AgentRuntimeTransitionError("Agent Run stage acknowledgement does not match the final change")
+            if _code_hash(editor_version.code) != editor_version.hash:
+                raise AgentRuntimeTransitionError("Agent Run stage acknowledgement hash does not match its code")
+            if run.staged_change_id:
+                change = read_change(run.staged_change_id)
+                if not change:
+                    raise AgentRuntimeTransitionError("Persisted Agent Run change is unavailable")
+                return change
+
+            change = create_change_from_agent_run(run)
+            entry.run = run.model_copy(update={"staged_change_id": change.id})
+            self._conversation.record_staged_change(run_id, change.id)
+            if self._audit_log:
+                self._audit_log.record_staged_change(entry.run, change.id)
+            return change
+
     async def wait(self, run_id: str) -> AgentRun | None:
         entry = await self._entry(run_id)
         if not entry:
@@ -157,6 +248,11 @@ class AgentRunManager:
         async with entry.lock:
             if entry.run.status == "needs_input":
                 entry.run = cancel_agent_run(entry.run)
+                entry.cancel_requested = True
+                task = entry.task
+                published = entry.run.model_copy(deep=True)
+            elif entry.run.status == "completed" and not entry.run.staged_change_id:
+                entry.run = discard_unstaged_completed_agent_run(entry.run)
                 entry.cancel_requested = True
                 task = entry.task
                 published = entry.run.model_copy(deep=True)
@@ -282,9 +378,16 @@ class AgentRunManager:
                     entry.active_turn_revision = None
 
     async def _publish(self, run: AgentRun) -> None:
+        self._conversation.record_state(run)
+        if self._audit_log:
+            self._audit_log.record_state(run)
         if not self._on_update:
             return
         try:
             await self._on_update(run.to_public())
         except Exception:
             return
+
+
+def _code_hash(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()

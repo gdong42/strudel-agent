@@ -1,0 +1,19 @@
+{
+  "id": "editor-update-reconciliation",
+  "title": "Preserve a concurrent bass edit",
+  "description": "The agent should reconcile its original drum request against a newer performer edit rather than overwrite it.",
+  "sourceFixture": "fixtures/house-base.strudel.js",
+  "editorUpdateFixture": "fixtures/house-user-bass-edit.strudel.js",
+  "projectContextFixture": "fixtures/house-context.md",
+  "intent": "Make the drums more energetic while I am editing the bass line.",
+  "expected": {
+    "terminalStatus": "completed",
+    "action": "apply",
+    "mustChangeRegions": ["drums"],
+    "mustPreserveRegions": ["bass", "harmony", "pad", "visuals"],
+    "review": [
+      "The performer's newer bass edit remains intact in the final code.",
+      "The drum change still fulfills the original energy request."
+    ]
+  }
+}

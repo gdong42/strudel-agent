@@ -5,24 +5,24 @@ import json
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .agent import AgentConfigurationError, AgentResponseError, create_agent_service, list_provider_info
+from .agent import AgentConfigurationError, create_agent_service, list_provider_info
 from .agent_runs import AgentRunManager
 from .agent_runtime import AgentRuntimeTransitionError, build_run_budget
-from .changes import create_change, latest_change, undo_change
+from .changes import latest_change, undo_change
 from .config import load_config
 from .models import (
     AgentRunEditorUpdateRequest,
     AgentRunInputRequest,
     AgentRunPublic,
+    AgentRunStageRequest,
     AgentRunStartRequest,
     ChangeListResponse,
-    ChangeRequest,
     ChangeUndoResponse,
     AgentSettingsResponse,
     LOCAL_PROJECT_ID,
@@ -36,7 +36,10 @@ from .models import (
     ProviderTestRequest,
     ProviderTestResponse,
 )
-from .providers.base import AgentProvider, ProviderError
+from .providers.base import ProviderError
+from .project_context import ProjectContextError, load_project_context
+from .run_audit import AgentAuditLog
+from .samples import SampleListResponse, SampleRegistryError, declared_samples, load_sample_registry
 from .snapshots import create_snapshot, latest_snapshot, list_snapshots, read_snapshot
 from .tracks import read_track, write_track
 
@@ -85,7 +88,8 @@ async def broadcast(event: str, payload: dict[str, Any]) -> None:
         await queue.put((event, payload))
 
 
-agent_runs = AgentRunManager(on_update=broadcast_agent_run)
+agent_audit = AgentAuditLog()
+agent_runs = AgentRunManager(on_update=broadcast_agent_run, audit_log=agent_audit)
 
 
 @app.get("/track")
@@ -140,6 +144,17 @@ async def revert_snapshot(snapshot_id: str) -> dict[str, Any]:
     )
 
 
+@app.get("/samples")
+async def get_samples() -> dict[str, Any]:
+    try:
+        registry = load_sample_registry()
+    except SampleRegistryError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return SampleListResponse(configured=registry.configured, samples=declared_samples(registry)).model_dump(
+        by_alias=True
+    )
+
+
 @app.get("/agent/settings")
 async def get_agent_settings() -> dict[str, Any]:
     config = load_config().agent
@@ -175,6 +190,8 @@ async def start_agent_run(
         raise HTTPException(status_code=400, detail="Agent Run editor code cannot be empty")
 
     try:
+        config = load_config()
+        project_context = load_project_context(config.agent.context_file)
         service = create_agent_service(
             x_agent_provider,
             model=x_agent_model,
@@ -184,12 +201,13 @@ async def start_agent_run(
             intent=payload.intent,
             editor_version=payload.editor_version,
             apply_mode=payload.apply_mode,
-            budget=build_run_budget(load_config().agent.runtime),
+            budget=build_run_budget(config.agent.runtime),
             provider_name=service.provider_name,
             model=service.model or service.provider_name,
-            provider=cast(AgentProvider, service.provider),
+            provider=service.provider,
+            project_context=project_context,
         )
-    except (AgentConfigurationError, AgentRuntimeTransitionError) as error:
+    except (AgentConfigurationError, AgentRuntimeTransitionError, ProjectContextError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return run.to_public()
 
@@ -230,7 +248,7 @@ async def answer_agent_run(
             answer=payload.answer,
             provider_name=service.provider_name,
             model=service.model or service.provider_name,
-            provider=cast(AgentProvider, service.provider),
+            provider=service.provider,
         )
     except AgentConfigurationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -242,15 +260,41 @@ async def answer_agent_run(
 
 
 @app.post("/agent/runs/{run_id}/editor")
-async def update_agent_run_editor(run_id: str, payload: AgentRunEditorUpdateRequest) -> AgentRunPublic:
+async def update_agent_run_editor(
+    run_id: str,
+    payload: AgentRunEditorUpdateRequest,
+    x_agent_provider: str | None = Header(default=None),
+    x_agent_model: str | None = Header(default=None),
+    x_agent_api_key: str | None = Header(default=None),
+) -> AgentRunPublic:
     if not payload.base_hash.strip() or not payload.editor_version.code.strip():
         raise HTTPException(status_code=400, detail="Agent Run editor updates require non-empty code and hashes")
+    existing_run = await agent_runs.get(run_id)
+    if not existing_run:
+        raise HTTPException(status_code=404, detail="Agent Run not found")
     try:
-        run = await agent_runs.update_editor(
-            run_id,
-            base_hash=payload.base_hash,
-            editor_version=payload.editor_version,
-        )
+        if existing_run.status == "completed":
+            service = create_agent_service(
+                x_agent_provider,
+                model=x_agent_model,
+                api_key=x_agent_api_key,
+            )
+            run = await agent_runs.reopen_completed(
+                run_id,
+                base_hash=payload.base_hash,
+                editor_version=payload.editor_version,
+                provider_name=service.provider_name,
+                model=service.model or service.provider_name,
+                provider=service.provider,
+            )
+        else:
+            run = await agent_runs.update_editor(
+                run_id,
+                base_hash=payload.base_hash,
+                editor_version=payload.editor_version,
+            )
+    except AgentConfigurationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except AgentRuntimeTransitionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     if not run:
@@ -266,31 +310,19 @@ async def cancel_agent_run(run_id: str) -> AgentRunPublic:
     return run.to_public()
 
 
-@app.post("/changes")
-async def post_change(
-    payload: ChangeRequest,
-    request: Request,
-    x_agent_provider: str | None = Header(default=None),
-    x_agent_model: str | None = Header(default=None),
-    x_agent_api_key: str | None = Header(default=None),
-) -> dict[str, Any]:
-    if not payload.intent.strip():
-        raise HTTPException(status_code=400, detail="Change intent cannot be empty")
-    if not payload.current_code.strip():
-        raise HTTPException(status_code=400, detail="Current code cannot be empty")
+@app.post("/agent/runs/{run_id}/stage", status_code=201)
+async def acknowledge_agent_run_stage(run_id: str, payload: AgentRunStageRequest) -> dict[str, Any]:
     try:
-        generated = await create_agent_service(
-            x_agent_provider,
-            model=x_agent_model,
-            api_key=x_agent_api_key,
-        ).create_change(payload)
-    except AgentConfigurationError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    except (AgentResponseError, ProviderError) as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    if await request.is_disconnected():
-        raise HTTPException(status_code=499, detail="Agent request was cancelled")
-    return create_change(payload, generated).model_dump(by_alias=True)
+        change = await agent_runs.acknowledge_stage(
+            run_id,
+            base_hash=payload.base_hash,
+            editor_version=payload.editor_version,
+        )
+    except AgentRuntimeTransitionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if not change:
+        raise HTTPException(status_code=404, detail="Agent Run not found")
+    return change.model_dump(by_alias=True)
 
 
 @app.get("/changes/latest")
@@ -303,6 +335,7 @@ async def post_change_undo(change_id: str) -> dict[str, Any]:
     change = undo_change(change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    agent_audit.record_change_undone(change)
     return ChangeUndoResponse(change=change, code=change.pre_agent_code).model_dump(by_alias=True)
 
 

@@ -9,6 +9,8 @@ __pycache__/
 *.py[cod]
 snapshots/*.json
 changes/*.json
+audits/*.json
+evals/results/*.json
 .e2e-workspace/
 test-results/
 playwright-report/

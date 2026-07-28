@@ -1,0 +1,17 @@
+{
+  "id": "conflicting-tempo-request",
+  "title": "Clarify a conflicting tempo request",
+  "description": "The agent should ask the performer to resolve a material conflict instead of choosing a tempo silently.",
+  "sourceFixture": "fixtures/house-four-base.strudel.js",
+  "projectContextFixture": "fixtures/house-context.md",
+  "intent": "Make the track faster, but keep the BPM exactly at 124. Ask me before resolving this conflict.",
+  "expected": {
+    "terminalStatus": "needs_input",
+    "mustChangeRegions": [],
+    "mustPreserveRegions": ["drums", "bass", "harmony", "pad", "visuals"],
+    "review": [
+      "The question identifies the tempo conflict concisely.",
+      "No candidate is staged before the performer answers."
+    ]
+  }
+}

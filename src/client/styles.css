@@ -130,6 +130,16 @@ aside {
 .agent-panel textarea { box-sizing: border-box; width: 100%; border: 1px solid #59636c; border-radius: 4px; background: #101214; color: #f4f1ea; padding: 8px; font: inherit; }
 .auto-fire { display: flex; align-items: center; gap: 6px; }
 .agent-actions { display: flex; gap: 8px; }
+.agent-question { border-top: 1px solid #2d3338; margin-top: 10px; padding-top: 10px; }
+.agent-question-fieldset { border: 0; margin: 0; min-width: 0; padding: 0; }
+.agent-question legend { color: #e0e5e9; font-size: 13px; line-height: 1.4; margin: 0 0 8px; padding: 0; }
+.agent-question-options { display: grid; gap: 5px; list-style: none; margin: 0; padding: 0; }
+.agent-question-option { border-left: 2px solid #5f9ea0; color: #b8c0c7; cursor: pointer; display: grid; font-size: 12px; gap: 7px; grid-template-columns: auto minmax(0, 1fr); padding-left: 7px; }
+.agent-question-option input { margin: 3px 0 0; }
+.agent-question-option-copy { display: grid; gap: 2px; }
+.agent-question-option strong { color: #e0e5e9; font-weight: 600; }
+#agent-question-answer { margin-top: 8px; }
+.agent-question-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
 #agent-explanation { color: #b8c0c7; font-size: 12px; margin-top: 10px; }
 .agent-warning { border-left: 3px solid #f1d27a; margin: 6px 0; padding-left: 7px; font-size: 12px; }
 .warning-risk { border-color: #ff7272; color: #ff9b9b; }
@@ -170,6 +180,52 @@ code {
   display: grid;
   gap: 8px;
   margin-top: 6px;
+}
+
+.sample-list {
+  display: grid;
+  gap: 7px;
+  margin: 6px 0 14px;
+  color: #8f9aa3;
+  font-size: 12px;
+}
+
+.sample-item {
+  border-top: 1px solid #2d3338;
+  padding-top: 7px;
+}
+
+.sample-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.sample-header code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sample-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.sample-tag {
+  border: 1px solid #3d4850;
+  color: #b8c0c7;
+  padding: 0 4px;
+}
+
+.sample-item p {
+  color: #8f9aa3;
+  font-size: 11px;
+  margin: 3px 0 0;
 }
 
 .snapshot-item {

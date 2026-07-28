@@ -5,31 +5,34 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from .models import AgentResult, ChangeRecord, ChangeRequest, LOCAL_PROJECT_ID, LOCAL_SESSION_ID
+from .models import AgentRun, ChangeRecord
 from .paths import changes_dir
 
 
 CHANGES_DIR = changes_dir()
 
 
-def create_change(request: ChangeRequest, generated: AgentResult) -> ChangeRecord:
+def create_change_from_agent_run(run: AgentRun) -> ChangeRecord:
+    if run.status != "completed" or not run.final_change or run.final_change.action != "apply":
+        raise ValueError("Only completed apply Agent Runs may be persisted as changes")
+
     now = int(time.time() * 1000)
     record = ChangeRecord(
         id=f"{now}-{uuid4().hex[:8]}",
-        projectId=LOCAL_PROJECT_ID,
-        sessionId=LOCAL_SESSION_ID,
+        projectId=run.project_id,
+        sessionId=run.session_id,
         createdAt=now,
-        intent=request.intent.strip(),
-        applyMode=request.apply_mode,
-        preAgentCode=request.current_code,
-        code=generated.code,
-        explanation=generated.explanation,
-        action=generated.action,
-        provider=generated.provider,
-        model=generated.model,
-        latencyMs=generated.latency_ms,
-        warnings=generated.warnings,
-        ranges=generated.ranges,
+        intent=run.intent,
+        applyMode=run.apply_mode,
+        preAgentCode=run.editor_version.code,
+        code=run.final_change.code,
+        explanation=run.final_change.explanation,
+        action=run.final_change.action,
+        provider=run.provider or "unknown",
+        model=run.model,
+        latencyMs=max(0, run.updated_at - run.created_at),
+        warnings=run.final_change.warnings,
+        ranges=run.final_change.ranges,
     )
     _write_change(record)
     return record

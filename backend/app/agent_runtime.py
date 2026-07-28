@@ -23,7 +23,7 @@ from .models import (
     ToolCall,
     ToolResult,
 )
-from .prompt_contract import AGENT_RUNTIME_SYSTEM_PROMPT
+from .prompt_contract import build_agent_runtime_system_prompt
 from .providers.base import AgentProvider, ProviderError
 from .tools import ToolRegistry
 
@@ -69,6 +69,8 @@ def create_agent_run(
     budget: AgentRunBudget,
     provider: str,
     model: str,
+    project_context: str | None = None,
+    conversation_context: list[dict[str, object]] | None = None,
     now: int | None = None,
     run_id: str | None = None,
 ) -> AgentRun:
@@ -79,6 +81,13 @@ def create_agent_run(
         raise AgentRuntimeTransitionError("Agent Run apply mode is invalid")
     if not provider.strip() or not model.strip():
         raise AgentRuntimeTransitionError("Agent Run provider and model are required")
+
+    initial_input: dict[str, object] = {
+        "intent": normalized_intent,
+        "editorVersion": editor_version.model_dump(by_alias=True),
+    }
+    if conversation_context:
+        initial_input["conversationContext"] = conversation_context
 
     timestamp = _timestamp(now)
     return AgentRun(
@@ -95,14 +104,11 @@ def create_agent_run(
         provider=provider,
         model=model,
         messages=[
-            AgentMessage(role="system", content=AGENT_RUNTIME_SYSTEM_PROMPT),
+            AgentMessage(role="system", content=build_agent_runtime_system_prompt(project_context)),
             AgentMessage(
                 role="user",
                 content=json.dumps(
-                    {
-                        "intent": normalized_intent,
-                        "editorVersion": editor_version.model_dump(by_alias=True),
-                    },
+                    initial_input,
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
@@ -156,6 +162,12 @@ def cancel_agent_run(run: AgentRun, *, now: int | None = None) -> AgentRun:
     if run.status not in {"running", "needs_input"}:
         raise AgentRuntimeTransitionError("Only active Agent Runs may be cancelled")
     return _rebuild_run(run, now=now, status="cancelled", pendingInput=None)
+
+
+def discard_unstaged_completed_agent_run(run: AgentRun, *, now: int | None = None) -> AgentRun:
+    if run.status != "completed" or not run.final_change or run.staged_change_id:
+        raise AgentRuntimeTransitionError("Only unstaged completed Agent Runs may be cancelled")
+    return _rebuild_run(run, now=now, status="cancelled", finalChange=None)
 
 
 def resume_agent_run(
@@ -216,6 +228,50 @@ def update_agent_run_editor_version(
         run,
         now=now,
         editorVersion=editor_version,
+        messages=[
+            *run.messages,
+            AgentMessage(
+                role="user",
+                content=json.dumps(
+                    {
+                        "editorUpdate": {
+                            "baseHash": base_hash,
+                            "editorVersion": editor_version.model_dump(by_alias=True),
+                        }
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            ),
+        ],
+    )
+
+
+def reopen_completed_agent_run(
+    run: AgentRun,
+    *,
+    base_hash: str,
+    editor_version: EditorVersion,
+    now: int | None = None,
+) -> AgentRun:
+    if run.status != "completed" or not run.final_change:
+        raise AgentRuntimeTransitionError("Only completed Agent Runs may be reopened after a stale final")
+    if run.staged_change_id:
+        raise AgentRuntimeTransitionError("A persisted Agent Run change cannot be reopened")
+    if not base_hash.strip() or not editor_version.code.strip():
+        raise AgentRuntimeTransitionError("Agent Run editor updates require non-empty code and hashes")
+    if run.editor_version.hash != base_hash:
+        raise AgentRuntimeTransitionError("Agent Run editor update is stale")
+    if editor_version.hash == run.editor_version.hash:
+        if editor_version.code != run.editor_version.code:
+            raise AgentRuntimeTransitionError("Agent Run editor update reuses a hash for different code")
+        raise AgentRuntimeTransitionError("Completed Agent Run editor update must contain a newer version")
+    return _rebuild_run(
+        run,
+        now=now,
+        status="running",
+        editorVersion=editor_version,
+        finalChange=None,
         messages=[
             *run.messages,
             AgentMessage(

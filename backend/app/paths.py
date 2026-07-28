@@ -28,3 +28,7 @@ def snapshots_dir() -> Path:
 
 def changes_dir() -> Path:
     return project_root() / "changes"
+
+
+def audits_dir() -> Path:
+    return project_root() / "audits"

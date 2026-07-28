@@ -97,10 +97,10 @@ describe('RuntimeStateStore', () => {
 it('stages and undoes an agent change without changing active code', () => {
   const store = new RuntimeStateStore(initialState);
   store.stageChange({
-    id: 'change-1', projectId: 'p', sessionId: 's', createdAt: 1,
+    id: 'change-1', runId: null,
     intent: 'more groove', applyMode: 'manual',
     preAgentCode: 'old', code: 'new', explanation: 'changed groove',
-    provider: 'mock', model: null, latencyMs: 1, warnings: [], undoneAt: null,
+    action: 'apply', warnings: [],
   });
 
   expect(store.get().activeCode).toBe(initialState.activeCode);
@@ -110,4 +110,18 @@ it('stages and undoes an agent change without changing active code', () => {
   store.undoAgentChange('old');
   expect(store.get().editorCode).toBe('old');
   expect(store.get().changeSet).toBeNull();
+});
+
+it('persists stage metadata without overwriting a later manual editor change', () => {
+  const store = new RuntimeStateStore(initialState);
+  store.stageChange({
+    id: null, runId: 'run-1', intent: 'more groove', applyMode: 'manual',
+    preAgentCode: 'old', code: 'agent code', explanation: 'changed groove', action: 'apply', warnings: [],
+  });
+  store.setEditorCode('manual adjustment');
+
+  store.markStagedChangePersisted('run-1', 'change-1');
+
+  expect(store.get().editorCode).toBe('manual adjustment');
+  expect(store.get().changeSet?.id).toBe('change-1');
 });

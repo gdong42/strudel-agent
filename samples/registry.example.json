@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "sounds": [
+    {
+      "name": "example_kick",
+      "tags": ["drum", "kick", "house"],
+      "description": "Replace with a sound name registered by this workspace."
+    },
+    {
+      "name": "example_hat",
+      "tags": ["drum", "hat"]
+    }
+  ]
+}

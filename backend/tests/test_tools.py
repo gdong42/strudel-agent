@@ -1,7 +1,21 @@
 from __future__ import annotations
 
 from app.models import ToolCall
+from app.samples import DeclaredSample, LoadedSampleRegistry, SampleRegistry, SampleRegistryError
 from app.tools import ToolRegistry
+
+
+def configured_sample_registry() -> LoadedSampleRegistry:
+    return LoadedSampleRegistry(
+        configured=True,
+        registry=SampleRegistry(
+            version=1,
+            sounds=[
+                DeclaredSample(name="house_kick", tags=["drum", "kick", "house"]),
+                DeclaredSample(name="house_hat", tags=["drum", "hat", "house"]),
+            ],
+        ),
+    )
 
 
 def test_registry_exposes_strict_runtime_tool_schemas() -> None:
@@ -10,11 +24,13 @@ def test_registry_exposes_strict_runtime_tool_schemas() -> None:
     assert [definition.name for definition in definitions] == [
         "inspect_diff",
         "validate_candidate",
+        "lookup_samples",
+        "inspect_sample_usage",
         "finalize_change",
         "request_user_input",
     ]
     assert all(definition.input_schema["additionalProperties"] is False for definition in definitions)
-    assert definitions[2].input_schema["required"] == ["code", "explanation", "action", "warnings"]
+    assert definitions[4].input_schema["required"] == ["code", "explanation", "action", "warnings"]
 
 
 def test_inspect_diff_returns_deterministic_line_summary() -> None:
@@ -53,6 +69,81 @@ def test_validate_candidate_returns_recoverable_errors_and_mini_notation_warning
         "category": "mini-notation",
         "message": "Pattern-like mini-notation should use double quotes or backticks, not single quotes.",
     }]
+
+
+def test_lookup_samples_filters_a_declared_local_registry() -> None:
+    registry = ToolRegistry(sample_registry_loader=configured_sample_registry)
+
+    result = registry.execute(
+        ToolCall(
+            id="call-1",
+            name="lookup_samples",
+            arguments={"query": "house", "tags": ["drum"], "limit": 1},
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output == {
+        "registryConfigured": True,
+        "total": 2,
+        "sounds": [{"name": "house_hat", "tags": ["drum", "hat", "house"], "description": None}],
+    }
+
+
+def test_inspect_sample_usage_reports_only_new_undeclared_direct_sound_names() -> None:
+    registry = ToolRegistry(sample_registry_loader=configured_sample_registry)
+
+    result = registry.execute(
+        ToolCall(
+            id="call-1",
+            name="inspect_sample_usage",
+            arguments={
+                "baseCode": 'stack(s("house_kick"), note("c3").s("sine"))',
+                "candidateCode": 'stack(s("house_kick [house_hat room_rim]"), note("c3").s("sine"))',
+            },
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output == {
+        "registryConfigured": True,
+        "baseSounds": ["house_kick"],
+        "candidateSounds": ["house_hat", "house_kick", "room_rim"],
+        "introducedSounds": ["house_hat", "room_rim"],
+        "declaredIntroducedSounds": ["house_hat"],
+        "undeclaredIntroducedSounds": ["room_rim"],
+    }
+
+
+def test_inspect_sample_usage_remains_non_blocking_when_no_registry_is_configured() -> None:
+    registry = ToolRegistry(
+        sample_registry_loader=lambda: LoadedSampleRegistry(configured=False, registry=SampleRegistry(version=1))
+    )
+
+    result = registry.execute(
+        ToolCall(
+            id="call-1",
+            name="inspect_sample_usage",
+            arguments={"baseCode": 's("bd")', "candidateCode": 's("bd room_rim")'},
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output["registryConfigured"] is False
+    assert result.output["introducedSounds"] == ["room_rim"]
+    assert result.output["undeclaredIntroducedSounds"] == []
+
+
+def test_sample_registry_failures_are_recoverable_tool_outcomes() -> None:
+    def unavailable_registry() -> LoadedSampleRegistry:
+        raise SampleRegistryError("bad registry")
+
+    result = ToolRegistry(sample_registry_loader=unavailable_registry).execute(
+        ToolCall(id="call-1", name="lookup_samples", arguments={"query": "", "tags": [], "limit": 20})
+    )
+
+    assert result.status == "recoverable_error"
+    assert result.output["error"]["code"] == "sample_registry_unavailable"
 
 
 def test_finalize_change_returns_normalized_internal_final_change() -> None:

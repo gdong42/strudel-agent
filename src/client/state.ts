@@ -1,4 +1,16 @@
-import type { ChangeRecord, RuntimeStatePayload, SnapshotRecord, TrackPayload } from './bridge';
+import type { ApplyMode, ChangeWarning, RuntimeStatePayload, SnapshotRecord, TrackPayload } from './bridge';
+
+export interface StagedAgentChange {
+  id: string | null;
+  runId: string | null;
+  intent: string;
+  applyMode: ApplyMode;
+  preAgentCode: string;
+  code: string;
+  explanation: string;
+  action: 'apply' | 'noop';
+  warnings: ChangeWarning[];
+}
 
 export interface ClientRuntimeState {
   projectId: string;
@@ -8,7 +20,7 @@ export interface ClientRuntimeState {
   lastGoodCode: string;
   lastSnapshotId: string | null;
   preAgentCode: string | null;
-  changeSet: ChangeRecord | null;
+  changeSet: StagedAgentChange | null;
 }
 
 export type StateListener = (state: ClientRuntimeState) => void;
@@ -78,8 +90,14 @@ export class RuntimeStateStore {
     });
   }
 
-  stageChange(change: ChangeRecord): void {
+  stageChange(change: StagedAgentChange): void {
     this.update({ editorCode: change.code, preAgentCode: change.preAgentCode, changeSet: change });
+  }
+
+  markStagedChangePersisted(runId: string, changeId: string): void {
+    const changeSet = this.state.changeSet;
+    if (!changeSet || changeSet.runId !== runId) return;
+    this.update({ changeSet: { ...changeSet, id: changeId } });
   }
 
   undoAgentChange(code: string): void {

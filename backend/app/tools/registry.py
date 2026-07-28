@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..models import AgentFinalChange, RequestUserInput, ToolCall, ToolDefinition, ToolResult
+from ..samples import LoadedSampleRegistry, SampleRegistryError, declared_samples, load_sample_registry
 
 
 class InspectDiffArguments(BaseModel):
@@ -20,6 +21,21 @@ class InspectDiffArguments(BaseModel):
 class ValidateCandidateArguments(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
+    candidate_code: str = Field(alias="candidateCode")
+
+
+class LookupSamplesArguments(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    query: str = ""
+    tags: list[str] = Field(default_factory=list)
+    limit: int = Field(default=20, ge=1, le=50)
+
+
+class InspectSampleUsageArguments(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    base_code: str = Field(alias="baseCode")
     candidate_code: str = Field(alias="candidateCode")
 
 
@@ -52,6 +68,11 @@ ToolHandler = Callable[[ToolCall], ToolResult]
 
 _SINGLE_QUOTED_PATTERN_CALL = re.compile(r"\b(?:s|sound|note|n)\(\s*'[^']*(?:[<>\[\]~*]|bd|sd|hh|cp)[^']*'\s*\)")
 _DYNAMIC_EXECUTION = re.compile(r"\b(?:eval|Function)\s*\(")
+_DIRECT_SOUND_CALL = re.compile(
+    r"(?<![\w.])(?:s|sound)\s*\(\s*(?:\"((?:\\.|[^\"\\])*)\"|'((?:\\.|[^'\\])*)')",
+    re.DOTALL,
+)
+_SOUND_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 _OPENING_DELIMITERS = {"(": ")", "[": "]", "{": "}"}
 _CLOSING_DELIMITERS = {value: key for key, value in _OPENING_DELIMITERS.items()}
 _WARNING_SCHEMA: dict[str, Any] = {
@@ -82,7 +103,8 @@ _QUESTION_OPTION_SCHEMA: dict[str, Any] = {
 class ToolRegistry:
     """Deterministic runtime tools. Their results remain internal to an Agent Run."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, sample_registry_loader: Callable[[], LoadedSampleRegistry] = load_sample_registry) -> None:
+        self._sample_registry_loader = sample_registry_loader
         self._definitions = {
             "inspect_diff": ToolDefinition(
                 name="inspect_diff",
@@ -105,6 +127,33 @@ class ToolRegistry:
                     "additionalProperties": False,
                     "properties": {"candidateCode": {"type": "string"}},
                     "required": ["candidateCode"],
+                },
+            ),
+            "lookup_samples": ToolDefinition(
+                name="lookup_samples",
+                description="List project-declared sound names from the optional local sample registry. Use an empty query and tag list to list the first matching names.",
+                inputSchema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "query": {"type": "string"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    },
+                    "required": ["query", "tags", "limit"],
+                },
+            ),
+            "inspect_sample_usage": ToolDefinition(
+                name="inspect_sample_usage",
+                description="Compare direct s()/sound() names in base and candidate code against the project sample registry. It reports only newly introduced undeclared names.",
+                inputSchema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "baseCode": {"type": "string"},
+                        "candidateCode": {"type": "string"},
+                    },
+                    "required": ["baseCode", "candidateCode"],
                 },
             ),
             "finalize_change": ToolDefinition(
@@ -141,6 +190,8 @@ class ToolRegistry:
         self._handlers: dict[str, ToolHandler] = {
             "inspect_diff": self._inspect_diff,
             "validate_candidate": self._validate_candidate,
+            "lookup_samples": self._lookup_samples,
+            "inspect_sample_usage": self._inspect_sample_usage,
             "finalize_change": self._finalize_change,
             "request_user_input": self._request_user_input,
         }
@@ -228,6 +279,61 @@ class ToolRegistry:
             {"valid": not errors, "errors": errors, "warnings": warnings},
         )
 
+    def _lookup_samples(self, call: ToolCall) -> ToolResult:
+        arguments = LookupSamplesArguments.model_validate(call.arguments)
+        try:
+            registry = self._sample_registry_loader()
+        except SampleRegistryError:
+            return self._sample_registry_error(call)
+        if not registry.configured:
+            return self._result(call, "ok", {"registryConfigured": False, "total": 0, "sounds": []})
+
+        query = arguments.query.strip().casefold()
+        requested_tags = {tag.strip().casefold() for tag in arguments.tags if tag.strip()}
+        matches = [
+            sound
+            for sound in declared_samples(registry)
+            if _sample_matches(sound.name, sound.tags, sound.description, query, requested_tags)
+        ]
+        return self._result(
+            call,
+            "ok",
+            {
+                "registryConfigured": True,
+                "total": len(matches),
+                "sounds": [
+                    {"name": sound.name, "tags": sound.tags, "description": sound.description}
+                    for sound in matches[: arguments.limit]
+                ],
+            },
+        )
+
+    def _inspect_sample_usage(self, call: ToolCall) -> ToolResult:
+        arguments = InspectSampleUsageArguments.model_validate(call.arguments)
+        try:
+            registry = self._sample_registry_loader()
+        except SampleRegistryError:
+            return self._sample_registry_error(call)
+
+        base_sounds = _direct_sound_names(arguments.base_code)
+        candidate_sounds = _direct_sound_names(arguments.candidate_code)
+        introduced_sounds = sorted(candidate_sounds - base_sounds, key=str.casefold)
+        declared_names = {sound.name.casefold() for sound in declared_samples(registry)}
+        declared_introduced = [sound for sound in introduced_sounds if sound.casefold() in declared_names]
+        undeclared_introduced = [sound for sound in introduced_sounds if sound.casefold() not in declared_names]
+        return self._result(
+            call,
+            "ok",
+            {
+                "registryConfigured": registry.configured,
+                "baseSounds": sorted(base_sounds, key=str.casefold),
+                "candidateSounds": sorted(candidate_sounds, key=str.casefold),
+                "introducedSounds": introduced_sounds,
+                "declaredIntroducedSounds": declared_introduced if registry.configured else [],
+                "undeclaredIntroducedSounds": undeclared_introduced if registry.configured else [],
+            },
+        )
+
     def _finalize_change(self, call: ToolCall) -> ToolResult:
         arguments = FinalizeChangeArguments.model_validate(call.arguments)
         final_change = arguments.to_final_change()
@@ -236,6 +342,19 @@ class ToolRegistry:
     def _request_user_input(self, call: ToolCall) -> ToolResult:
         request = RequestUserInput.model_validate(call.arguments)
         return self._result(call, "ok", {"request": request.model_dump(by_alias=True)})
+
+    @classmethod
+    def _sample_registry_error(cls, call: ToolCall) -> ToolResult:
+        return cls._result(
+            call,
+            "recoverable_error",
+            {
+                "error": {
+                    "code": "sample_registry_unavailable",
+                    "message": "The local sample registry could not be read.",
+                }
+            },
+        )
 
     @staticmethod
     def _result(
@@ -307,3 +426,21 @@ def _delimiter_error(code: str) -> str | None:
         character, index = stack[-1]
         return f"Unclosed '{character}' at character {index}."
     return None
+
+
+def _direct_sound_names(code: str) -> set[str]:
+    values = [match.group(1) or match.group(2) for match in _DIRECT_SOUND_CALL.finditer(code)]
+    return {name for value in values for name in _SOUND_NAME.findall(value)}
+
+
+def _sample_matches(
+    name: str,
+    tags: list[str],
+    description: str | None,
+    query: str,
+    requested_tags: set[str],
+) -> bool:
+    searchable = " ".join((name, *tags, description or "")).casefold()
+    if query and query not in searchable:
+        return False
+    return requested_tags.issubset({tag.casefold() for tag in tags})

@@ -213,9 +213,7 @@ Evaluation rules:
 - Successful evaluation records a snapshot and updates `lastGoodCode`.
 - Failed evaluation must not overwrite `lastGoodCode`.
 
-The current implementation still uses one-shot provider generation and
-client-side reconciliation. The target Agent Run keeps the same final staging
-behavior while moving candidate generation, validation, reconciliation, and
+The Agent Run owns candidate generation, validation, reconciliation, and
 revision behind the finalization boundary. Evaluation remains a user action
 unless `Auto Fire` is explicitly enabled and the completed result passes all
 gates.
@@ -263,6 +261,8 @@ Initial formal project layout:
 │     ├─ main.py
 │     ├─ agent_runtime.py
 │     ├─ agent_runs.py
+│     ├─ session_conversation.py
+│     ├─ run_audit.py
 │     ├─ prompt_contract.py
 │     ├─ changes.py
 │     ├─ tracks.py
@@ -285,9 +285,11 @@ Initial formal project layout:
 │  └─ main.strudel.js
 ├─ snapshots/
 ├─ changes/
+├─ audits/
 ├─ samples/
 ├─ project.config.json
 ├─ agent-context.md
+├─ evals/
 ├─ docs/
 ├─ package.json
 ├─ tsconfig.json
@@ -324,10 +326,10 @@ The current single-file POC can stay as a reference, but formal development shou
 
 ### Phase 3: Agent Staging and Diff
 
-- Add staged change endpoints:
-  - `POST /changes`
+- Add change-history endpoints:
   - `GET /changes/latest`
   - `POST /changes/:id/undo`
+- Stage completed Agent Run finals through `POST /agent/runs/:id/stage`.
 - Show side-by-side or inline diff.
 - Agent changes update the editor but do not evaluate in `Manual Fire`.
 - Staged changes remain in history for review and recovery.
@@ -340,9 +342,12 @@ The current single-file POC can stay as a reference, but formal development shou
 - Keep candidates and recoverable findings internal; persist and stage only completed final changes.
 - Add `needs_input` pause/resume for material ambiguity, conflicting constraints, and key creative decisions.
 - Feed concurrent editor updates into the active run so the agent reconciles and self-reviews again.
-- Add project context from `agent-context.md`.
-- Add session conversation and revision context without storing credentials or hidden reasoning.
-- Build fixed musical scenarios to tune instructions, tools, and runtime budgets.
+- Add optional project context from `agent-context.md`; keep musical conventions
+  there and retain runtime defaults in `project.config.json`.
+- Add a bounded, process-local session conversation ledger for revisions; keep
+  it separate from durable audit metadata and never store credentials, hidden
+  reasoning, or discarded candidate code.
+- Maintain fixed musical scenarios to tune instructions, tools, and runtime budgets.
 
 ### Phase 5: Validation Tools and Performance Hardening
 
