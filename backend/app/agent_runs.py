@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -18,7 +19,16 @@ from .agent_runtime import (
     update_agent_run_editor_version,
 )
 from .changes import create_change_from_agent_run, read_change
-from .models import AgentRun, AgentRunBudget, AgentRunFailure, AgentRunPublic, ChangeRecord, EditorVersion
+from .models import (
+    AgentActivity,
+    AgentRun,
+    AgentRunBudget,
+    AgentRunFailure,
+    AgentRunPublic,
+    ChangeRecord,
+    EditorVersion,
+    ToolResult,
+)
 from .providers.base import AgentProvider
 from .run_audit import AgentAuditLog
 from .session_conversation import SessionConversation
@@ -26,6 +36,18 @@ from .tools import ToolRegistry
 
 
 RunUpdateListener = Callable[[AgentRunPublic], Awaitable[None]]
+_MAX_PUBLIC_ACTIVITIES = 48
+_MAX_PUBLIC_COMMENTARY_CHARS = 280
+_PUBLIC_TOOL_NAMES = frozenset(
+    {
+        "inspect_diff",
+        "validate_candidate",
+        "lookup_samples",
+        "inspect_sample_usage",
+        "finalize_change",
+        "request_user_input",
+    }
+)
 
 
 @dataclass
@@ -117,7 +139,10 @@ class AgentRunManager:
         async with entry.lock:
             if entry.run.provider != provider_name or entry.run.model != model:
                 raise AgentRuntimeTransitionError("Agent Run must resume with its original provider and model")
-            entry.run = resume_agent_run(entry.run, question_id=question_id, answer=answer)
+            entry.run = _append_completed_activity(
+                resume_agent_run(entry.run, question_id=question_id, answer=answer),
+                "user_input",
+            )
             entry.revision += 1
             entry.cancel_requested = False
             entry.cancellation = AgentRunCancellation()
@@ -144,6 +169,7 @@ class AgentRunManager:
         if not entry:
             return None
 
+        published: AgentRun | None = None
         async with entry.lock:
             updated = update_agent_run_editor_version(
                 entry.run,
@@ -152,11 +178,16 @@ class AgentRunManager:
             )
             if updated == entry.run:
                 return updated.model_copy(deep=True)
+            if entry.active_turn_revision is not None:
+                updated = _finish_active_provider_activities(updated, "cancelled")
+            updated = _append_completed_activity(updated, "editor_update")
             entry.run = updated
             entry.revision += 1
             if updated.status == "running" and entry.active_turn_revision is not None:
                 entry.cancellation.cancel()
-            return updated.model_copy(deep=True)
+            published = updated.model_copy(deep=True)
+        await self._publish(published)
+        return published
 
     async def reopen_completed(
         self,
@@ -176,10 +207,13 @@ class AgentRunManager:
         async with entry.lock:
             if entry.run.provider != provider_name or entry.run.model != model:
                 raise AgentRuntimeTransitionError("Agent Run must reopen with its original provider and model")
-            entry.run = reopen_completed_agent_run(
-                entry.run,
-                base_hash=base_hash,
-                editor_version=editor_version,
+            entry.run = _append_completed_activity(
+                reopen_completed_agent_run(
+                    entry.run,
+                    base_hash=base_hash,
+                    editor_version=editor_version,
+                ),
+                "editor_update",
             )
             entry.revision += 1
             entry.cancel_requested = False
@@ -247,7 +281,7 @@ class AgentRunManager:
         published: AgentRun | None = None
         async with entry.lock:
             if entry.run.status == "needs_input":
-                entry.run = cancel_agent_run(entry.run)
+                entry.run = _finish_active_provider_activities(cancel_agent_run(entry.run), "cancelled")
                 entry.cancel_requested = True
                 task = entry.task
                 published = entry.run.model_copy(deep=True)
@@ -271,7 +305,7 @@ class AgentRunManager:
             direct_cancelled: AgentRun | None = None
             async with entry.lock:
                 if entry.run.status == "running":
-                    entry.run = cancel_agent_run(entry.run)
+                    entry.run = _finish_active_provider_activities(cancel_agent_run(entry.run), "cancelled")
                     direct_cancelled = entry.run.model_copy(deep=True)
             if direct_cancelled:
                 await self._publish(direct_cancelled)
@@ -319,31 +353,52 @@ class AgentRunManager:
         try:
             while True:
                 async with entry.lock:
-                    run = entry.run
-                    if run.status != "running":
+                    if entry.run.status != "running":
                         return
+                    run = _begin_model_activity(entry.run)
+                    entry.run = run
                     revision = entry.revision
                     cancellation = entry.cancellation
                     entry.active_turn_revision = revision
+
+                await self._publish(run)
+
+                async def report_commentary(commentary: str) -> None:
+                    await self._record_commentary(entry, revision, cancellation, commentary)
 
                 updated = await execute_model_turn(
                     run,
                     provider,
                     self._tools,
                     cancellation=cancellation,
+                    on_commentary=report_commentary,
                 )
                 async with entry.lock:
                     if entry.active_turn_revision == revision:
                         entry.active_turn_revision = None
                     if entry.cancel_requested and entry.run.status == "running":
-                        updated = cancel_agent_run(entry.run)
+                        updated = _finish_active_provider_activities(cancel_agent_run(entry.run), "cancelled")
                     elif entry.revision != revision:
                         if entry.cancellation is cancellation:
                             entry.cancellation = AgentRunCancellation()
                         continue
+                    else:
+                        updated = updated.model_copy(
+                            update={
+                                "activities": [
+                                    activity.model_copy(deep=True) for activity in entry.run.activities
+                                ]
+                            },
+                            deep=True,
+                        )
+                        activity_status = "cancelled" if updated.status == "cancelled" else "completed"
+                        updated = _finish_active_provider_activities(updated, activity_status)
+                        updated = _append_tool_activities(
+                            updated,
+                            updated.tool_results[len(run.tool_results) :],
+                        )
                     entry.run = updated
-                if updated.to_public() != run.to_public():
-                    await self._publish(updated)
+                await self._publish(updated)
                 if updated.status != "running":
                     return
         except asyncio.CancelledError:
@@ -352,7 +407,7 @@ class AgentRunManager:
             async with entry.lock:
                 if entry.run.status == "running":
                     entry.cancel_requested = True
-                    entry.run = cancel_agent_run(entry.run)
+                    entry.run = _finish_active_provider_activities(cancel_agent_run(entry.run), "cancelled")
                     cancelled = entry.run.model_copy(deep=True)
             if cancelled:
                 await self._publish(cancelled)
@@ -360,13 +415,16 @@ class AgentRunManager:
             failed: AgentRun | None = None
             async with entry.lock:
                 if entry.run.status == "running":
-                    entry.run = fail_agent_run(
-                        entry.run,
-                        AgentRunFailure(
-                            code="internal_error",
-                            message="The agent run could not complete.",
-                            retryable=False,
+                    entry.run = _finish_active_provider_activities(
+                        fail_agent_run(
+                            entry.run,
+                            AgentRunFailure(
+                                code="internal_error",
+                                message="The agent run could not complete.",
+                                retryable=False,
+                            ),
                         ),
+                        "completed",
                     )
                     failed = entry.run.model_copy(deep=True)
             if failed:
@@ -376,6 +434,30 @@ class AgentRunManager:
                 if entry.task is asyncio.current_task():
                     entry.task = None
                     entry.active_turn_revision = None
+
+    async def _record_commentary(
+        self,
+        entry: _RunEntry,
+        revision: int,
+        cancellation: AgentRunCancellation,
+        commentary: str,
+    ) -> None:
+        published: AgentRun | None = None
+        async with entry.lock:
+            if (
+                entry.run.status != "running"
+                or entry.revision != revision
+                or entry.active_turn_revision != revision
+                or entry.cancellation is not cancellation
+                or cancellation.is_cancelled
+            ):
+                return
+            updated = _set_commentary(entry.run, commentary)
+            if updated == entry.run:
+                return
+            entry.run = updated
+            published = updated.model_copy(deep=True)
+        await self._publish(published)
 
     async def _publish(self, run: AgentRun) -> None:
         self._conversation.record_state(run)
@@ -391,3 +473,120 @@ class AgentRunManager:
 
 def _code_hash(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _begin_model_activity(run: AgentRun) -> AgentRun:
+    return _append_activity(
+        run,
+        AgentActivity(
+            sequence=_next_activity_sequence(run),
+            kind="model_turn",
+            status="running",
+            startedAt=_timestamp(),
+            turn=run.usage.turns + 1,
+        ),
+    )
+
+
+def _append_completed_activity(run: AgentRun, kind: str) -> AgentRun:
+    timestamp = _timestamp()
+    return _append_activity(
+        run,
+        AgentActivity(
+            sequence=_next_activity_sequence(run),
+            kind=kind,
+            status="completed",
+            startedAt=timestamp,
+            completedAt=timestamp,
+        ),
+    )
+
+
+def _append_tool_activities(run: AgentRun, results: list[ToolResult]) -> AgentRun:
+    updated = run
+    for result in results:
+        timestamp = _timestamp()
+        updated = _append_activity(
+            updated,
+            AgentActivity(
+                sequence=_next_activity_sequence(updated),
+                kind="tool",
+                status="completed",
+                startedAt=timestamp,
+                completedAt=timestamp,
+                tool=result.name if result.name in _PUBLIC_TOOL_NAMES else "agent_tool",
+            ),
+        )
+    return updated
+
+
+def _set_commentary(run: AgentRun, commentary: str) -> AgentRun:
+    message = _normalize_public_commentary(commentary)
+    if not message:
+        return run
+    activities = [activity.model_copy(deep=True) for activity in run.activities]
+    for index in range(len(activities) - 1, -1, -1):
+        activity = activities[index]
+        if activity.kind != "commentary" or activity.status != "running":
+            continue
+        if message == activity.message:
+            return run
+        activities[index] = activity.model_copy(update={"message": message})
+        return run.model_copy(update={"activities": activities}, deep=True)
+
+    return _append_activity(
+        run,
+        AgentActivity(
+            sequence=_next_activity_sequence(run),
+            kind="commentary",
+            status="running",
+            startedAt=_timestamp(),
+            message=message,
+        ),
+    )
+
+
+def _finish_active_commentary_activity(run: AgentRun, status: str) -> AgentRun:
+    activities = [activity.model_copy(deep=True) for activity in run.activities]
+    for index in range(len(activities) - 1, -1, -1):
+        activity = activities[index]
+        if activity.kind == "commentary" and activity.status == "running":
+            activities[index] = activity.model_copy(
+                update={"status": status, "completed_at": _timestamp()},
+            )
+            return run.model_copy(update={"activities": activities}, deep=True)
+    return run
+
+
+def _finish_active_model_activity(run: AgentRun, status: str) -> AgentRun:
+    activities = [activity.model_copy(deep=True) for activity in run.activities]
+    for index in range(len(activities) - 1, -1, -1):
+        activity = activities[index]
+        if activity.kind == "model_turn" and activity.status == "running":
+            activities[index] = activity.model_copy(
+                update={"status": status, "completed_at": _timestamp()},
+            )
+            return run.model_copy(update={"activities": activities}, deep=True)
+    return run
+
+
+def _finish_active_provider_activities(run: AgentRun, status: str) -> AgentRun:
+    return _finish_active_model_activity(_finish_active_commentary_activity(run, status), status)
+
+
+def _append_activity(run: AgentRun, activity: AgentActivity) -> AgentRun:
+    activities = [*(item.model_copy(deep=True) for item in run.activities), activity]
+    return run.model_copy(update={"activities": activities[-_MAX_PUBLIC_ACTIVITIES:]}, deep=True)
+
+
+def _next_activity_sequence(run: AgentRun) -> int:
+    return run.activities[-1].sequence + 1 if run.activities else 1
+
+
+def _timestamp() -> int:
+    return int(time.time())
+
+
+def _normalize_public_commentary(value: str) -> str:
+    normalized = " ".join(value.replace("`", "").split())
+    return normalized[:_MAX_PUBLIC_COMMENTARY_CHARS].strip()

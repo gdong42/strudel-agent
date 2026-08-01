@@ -233,8 +233,9 @@ def test_start_and_read_agent_run_exposes_only_public_state(
 
         assert started.status_code == 202
         started_payload = started.json()
-        assert set(started_payload) == {"id", "status", "question", "finalChange", "error"}
+        assert set(started_payload) == {"id", "status", "question", "finalChange", "error", "activities"}
         assert started_payload["status"] == "running"
+        assert started_payload["activities"] == []
         assert "test-provider" not in json.dumps(started_payload)
 
         current = started_payload
@@ -244,17 +245,17 @@ def test_start_and_read_agent_run_exposes_only_public_state(
                 break
             time.sleep(0.01)
 
-        assert current == {
-            "id": started_payload["id"],
-            "status": "needs_input",
-            "question": {
-                "id": "tempo",
-                "question": "Keep the current tempo?",
-                "options": [{"id": "keep", "label": "Keep it", "description": None}],
-            },
-            "finalChange": None,
-            "error": None,
+        assert current["id"] == started_payload["id"]
+        assert current["status"] == "needs_input"
+        assert current["question"] == {
+            "id": "tempo",
+            "question": "Keep the current tempo?",
+            "options": [{"id": "keep", "label": "Keep it", "description": None}],
         }
+        assert current["finalChange"] is None
+        assert current["error"] is None
+        assert [activity["kind"] for activity in current["activities"]] == ["model_turn", "tool"]
+        assert current["activities"][-1]["tool"] == "request_user_input"
         assert "private ambiguity analysis" not in json.dumps(current)
 
         editor_updated = client.post(
@@ -661,4 +662,4 @@ async def test_agent_run_event_contains_only_public_payload() -> None:
 
     assert event == "agent-run"
     assert payload == run.model_dump(by_alias=True)
-    assert set(payload) == {"id", "status", "question", "finalChange", "error"}
+    assert set(payload) == {"id", "status", "question", "finalChange", "error", "activities"}

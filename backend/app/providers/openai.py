@@ -14,7 +14,7 @@ from ..models import (
     ToolCall,
     ToolDefinition,
 )
-from .base import ProviderError, parse_tool_arguments
+from .base import CommentaryEmitter, ModelCommentaryCallback, ProviderError, parse_tool_arguments
 from .http import ProviderHttpClient
 
 
@@ -33,6 +33,48 @@ class OpenAIProvider:
         self.http = ProviderHttpClient("OpenAI", api_key, OPENAI_API_BASE, transport=transport)
 
     async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        payload = self._turn_payload(request)
+        response = await self.http.request_json(
+            "POST",
+            "responses",
+            json=payload,
+        )
+        return self._parse_turn(response)
+
+    async def next_turn_stream(
+        self,
+        request: ModelTurnRequest,
+        on_commentary: ModelCommentaryCallback,
+    ) -> ModelTurnResult:
+        payload = self._turn_payload(request)
+        payload["stream"] = True
+        emitter = CommentaryEmitter(on_commentary)
+        completed_response: dict[str, Any] | None = None
+
+        async for event in self.http.stream_sse_json("POST", "responses", json=payload):
+            event_type = event.get("type")
+            if event_type == "response.output_text.delta":
+                delta = event.get("delta")
+                if not isinstance(delta, str):
+                    raise ProviderError("OpenAI returned invalid public commentary")
+                await emitter.push(delta)
+            elif event_type == "response.completed":
+                response = event.get("response")
+                if not isinstance(response, dict):
+                    raise ProviderError("OpenAI returned an invalid model turn")
+                completed_response = response
+            elif event_type in {"response.failed", "error"}:
+                raise ProviderError("OpenAI could not complete the model turn", retryable=True)
+
+        await emitter.flush()
+        if completed_response is None:
+            raise ProviderError("OpenAI returned an incomplete model turn", retryable=True)
+        return self._parse_turn(completed_response)
+
+    async def test_connection(self) -> None:
+        await self.http.request_json("GET", f"models/{quote(self.model, safe='')}")
+
+    def _turn_payload(self, request: ModelTurnRequest) -> dict[str, object]:
         if request.remaining_token_budget == 0:
             raise ProviderError("OpenAI model turn has no remaining token budget")
         payload: dict[str, object] = {
@@ -46,15 +88,7 @@ class OpenAIProvider:
             payload["instructions"] = instructions
         if request.tools:
             payload["tools"] = [self._tool_definition(tool) for tool in request.tools]
-        response = await self.http.request_json(
-            "POST",
-            "responses",
-            json=payload,
-        )
-        return self._parse_turn(response)
-
-    async def test_connection(self) -> None:
-        await self.http.request_json("GET", f"models/{quote(self.model, safe='')}")
+        return payload
 
     @staticmethod
     def _instructions(messages: list[AgentMessage]) -> str | None:

@@ -17,6 +17,7 @@ const runningRun: AgentRunPublic = {
   question: null,
   finalChange: null,
   error: null,
+  activities: [],
 };
 
 afterEach(() => {

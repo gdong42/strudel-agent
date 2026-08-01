@@ -81,12 +81,35 @@ export interface AgentRunFailure {
   retryable: boolean;
 }
 
+export type AgentActivityKind = 'model_turn' | 'commentary' | 'tool' | 'editor_update' | 'user_input';
+export type AgentActivityStatus = 'running' | 'completed' | 'cancelled';
+export type AgentActivityTool =
+  | 'inspect_diff'
+  | 'validate_candidate'
+  | 'lookup_samples'
+  | 'inspect_sample_usage'
+  | 'finalize_change'
+  | 'request_user_input'
+  | 'agent_tool';
+
+export interface AgentActivity {
+  sequence: number;
+  kind: AgentActivityKind;
+  status: AgentActivityStatus;
+  startedAt: number;
+  completedAt: number | null;
+  turn: number | null;
+  tool: AgentActivityTool | null;
+  message: string | null;
+}
+
 export interface AgentRunPublic {
   id: string;
   status: AgentRunStatus;
   question: AgentQuestion | null;
   finalChange: AgentFinalChange | null;
   error: AgentRunFailure | null;
+  activities: AgentActivity[];
 }
 
 export interface AgentRunStartPayload {

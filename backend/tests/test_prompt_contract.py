@@ -9,6 +9,8 @@ def test_runtime_prompt_requires_tool_driven_finalization_and_limited_clarificat
     assert "conversationContext" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "lookup_samples" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "inspect_sample_usage" in AGENT_RUNTIME_SYSTEM_PROMPT
+    assert "public progress channel" in AGENT_RUNTIME_SYSTEM_PROMPT
+    assert "hidden reasoning" in AGENT_RUNTIME_SYSTEM_PROMPT
 
 
 def test_runtime_prompt_adds_project_context_as_data_without_relaxing_runtime_rules() -> None:

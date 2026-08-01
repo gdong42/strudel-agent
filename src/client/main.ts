@@ -77,6 +77,10 @@ const agentPanel = new AgentPanel(
   requireElement<HTMLButtonElement>('#undo-change'),
   requireElement<HTMLElement>('#agent-explanation'),
   requireElement<HTMLElement>('#agent-warnings'),
+  requireElement<HTMLElement>('#agent-activity'),
+  requireElement<HTMLElement>('#agent-activity-summary'),
+  requireElement<HTMLTimeElement>('#agent-activity-elapsed'),
+  requireElement<HTMLOListElement>('#agent-activity-list'),
   requireElement<HTMLElement>('#agent-question'),
   requireElement<HTMLElement>('#agent-question-text'),
   requireElement<HTMLElement>('#agent-question-options'),
@@ -211,6 +215,7 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
   if (!repl || !state || activeAgentRun || startingAgentRun) return;
   startingAgentRun = true;
   agentPanel.setBusy(true);
+  agentPanel.startActivity();
   status.set('Agent Run is starting...', 'warn');
   try {
     const editorVersion = await captureEditorVersion();
@@ -237,6 +242,7 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
     activeAgentRun = null;
     clearActiveAgentRun(sessionStorage);
     agentPanel.setBusy(false);
+    agentPanel.clearActivity();
     status.set(error instanceof Error ? error.message : String(error), 'error');
   } finally {
     startingAgentRun = false;
@@ -269,6 +275,7 @@ async function refreshAgentRun(runId: string): Promise<void> {
 async function applyAgentRunUpdate(run: AgentRunPublic): Promise<void> {
   const activeRun = activeAgentRun;
   if (!activeRun || activeRun.id !== run.id) return;
+  agentPanel.showActivity(run);
 
   if (run.status === 'running') {
     agentPanel.clearQuestion();

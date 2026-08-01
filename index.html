@@ -32,6 +32,13 @@
             <label class="auto-fire"><input id="auto-fire" type="checkbox"> Auto Fire</label>
             <div class="agent-actions"><button id="stage-change" type="submit">Stage change</button><button id="cancel-change" type="button" hidden>Cancel</button><button id="undo-change" type="button" disabled>Undo</button></div>
           </form>
+          <section id="agent-activity" class="agent-activity" hidden>
+            <div class="agent-activity-header">
+              <strong id="agent-activity-summary">Starting</strong>
+              <time id="agent-activity-elapsed">00:00</time>
+            </div>
+            <ol id="agent-activity-list" class="agent-activity-list" aria-live="polite"></ol>
+          </section>
           <section id="agent-question" class="agent-question" aria-live="polite" hidden>
             <form id="agent-question-form">
               <fieldset class="agent-question-fieldset">

@@ -131,15 +131,20 @@ runStatus         — running | needs_input | completed | failed | cancelled
 baseCode/hash     — editor version the run currently reasons against
 turns             — normalized model messages and tool results needed to continue
 budgets           — turn, elapsed-time, token, and cancellation limits
+activities        — bounded, browser-safe progress metadata
 finalChange       — present only after successful finalization
 pendingQuestion   — present only while needs_input
 ```
 
 Candidate code, validation findings, and recoverable tool errors remain inside
 the run. They do not update `editorCode`, create a `changeSet`, or enter change
-history. A completed run crosses the staging boundary exactly once: its final
-change is compared with the latest editor version, staged, and then handled by
-Manual Fire or Auto Fire.
+history. The browser may observe normalized activity metadata such as a model
+turn starting, bounded public commentary, or an allowlisted tool completing,
+but never the underlying candidate, tool arguments, tool result, raw provider
+event, or hidden reasoning.
+A completed run crosses the staging boundary exactly once: its final change is
+compared with the latest editor version, staged, and then handled by Manual Fire
+or Auto Fire.
 
 `needs_input` is not a failed validation state. The agent may use it only when
 the user's intent is materially ambiguous, constraints conflict, or a creative
@@ -195,6 +200,15 @@ class AgentProvider(Protocol):
     async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         ...
 ```
+
+Providers may additionally implement `next_turn_stream(request,
+on_commentary)`. This extension still resolves to one complete
+`ModelTurnResult`; the callback receives throttled cumulative snapshots only
+from the provider's public assistant-content channel. OpenAI Responses adapters
+consume `response.output_text.delta`, while DeepSeek Chat Completions adapters
+consume `delta.content`. Reasoning events/content and streamed function
+arguments are ignored by the callback and remain private inputs to final turn
+reconstruction.
 
 `ModelTurnResult` contains normalized assistant content, tool calls, usage, and
 provider metadata. The runtime, not the adapter, decides whether to execute a
@@ -288,6 +302,16 @@ Normal candidate failures, scope violations, tool errors that can be repaired,
 and self-review notes remain internal. Hidden model reasoning is neither
 requested nor persisted.
 
+While a Run is active, a separate read-only activity timeline makes waiting
+observable without turning intermediate work into user decisions. It may show
+model-turn state, elapsed time, turn number, editor-context updates, user-input
+resumption, allowlisted tool names, and one bounded public-commentary entry per
+model turn. Commentary is the only model prose allowed here: the system prompt
+defines it as short, high-level, plain-text progress and the server normalizes
+and limits it. Candidate code, reasoning, tool arguments/results, and raw
+provider payloads remain private. Activity does not change the Run lifecycle or
+staging boundary.
+
 Cancellation is cooperative: the active provider task is cancelled and awaited
 before the Run becomes `cancelled`. Cancellation wins over a concurrently
 returned provider result, so no candidate from that turn can enter tool
@@ -308,20 +332,24 @@ POST /agent/runs/:id/input       Answer a needs_input question
 POST /agent/runs/:id/editor      Supply a newer editor version to the run
 POST /agent/runs/:id/cancel      Cancel the run
 POST /agent/runs/:id/stage       Persist a browser-acknowledged completed final
-GET  /events                     Stream public run status and final results
+GET  /events                     Stream public run status, safe activity, and final results
 ```
 
 ```python
 class AgentRunPublic(BaseModel):
     id: str
     status: Literal["running", "needs_input", "completed", "failed", "cancelled"]
+    activities: list[AgentActivity]
     question: AgentQuestion | None = None
     final_change: AgentFinalChange | None = None
     error: AgentRunFailure | None = None
 ```
 
 The public representation excludes internal candidates, recoverable findings,
-raw provider messages, and hidden reasoning.
+raw provider messages, tool arguments and results, and hidden reasoning.
+`activities` is a bounded projection with fixed activity kinds, statuses, and
+allowlisted tool names plus an optional length-limited commentary message; it is
+not a transcript of the private Agent Run.
 
 #### 6.6.1 Session Conversation Context
 
@@ -377,10 +405,13 @@ the audit log never copies that content.
 `GET /events` retains the existing `track` event and adds an `agent-run` event.
 Each `agent-run` payload is exactly an `AgentRunPublic` projection. The Run
 manager emits it when a Run enters `running` and whenever that public
-projection changes; tool-loop progress that remains internal does not produce
-browser events. When the SSE connection opens or reconnects, the browser also
-refreshes its active Run by ID so a pause or terminal state is not missed while
-the stream was unavailable.
+projection changes. Model-turn start/completion, completed allowlisted tools,
+editor-context updates, user-input resumption, and throttled public commentary
+update bounded public activity metadata. Provider reasoning, raw events, and
+tool payloads remain internal. When the SSE connection opens or reconnects, the
+browser also refreshes its active Run by ID so the complete bounded activity
+timeline, a pause, or a terminal state is not missed while the stream was
+unavailable.
 
 `POST /agent/runs/:id/input` accepts the pending question ID and an answer. It
 recreates a short-lived provider worker from the browser's transient provider
@@ -460,13 +491,13 @@ editing.
 | Module | Responsibility |
 |---|---|
 | `client/repl.ts` | `strudel-editor` adapter (see §4) |
-| `client/agent.ts` | Intent, public run status, clarification, and Manual/Auto Fire UI |
+| `client/agent.ts` | Intent, public activity timeline, clarification, and Manual/Auto Fire UI |
 | `client/diff.ts` | Diff computation and inline/side-by-side rendering |
 | `client/state.ts` | Client-side state machine (§5), transition guards |
 | `client/recovery.ts` | Revert to `lastGoodCode`, error display, panic handler |
 | `client/status.ts` | Connection, public run status, evaluation status, errors, and final warnings |
 | `client/settings.ts` | Browser-local provider/model settings and API-key storage policy |
-| `client/bridge.ts` | SSE listener, run commands, HTTP helpers, reconnect logic |
+| `client/bridge.ts` | SSE progress listener, run commands, HTTP helpers, reconnect restoration |
 | `client/main.ts` | App bootstrap, glue |
 
 ## 8. API Endpoints

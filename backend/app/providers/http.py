@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -44,6 +46,39 @@ class ProviderHttpClient:
             return response.json()
         except ValueError as error:
             raise ProviderError(f"{self.provider_label} returned an invalid response") from error
+
+    async def stream_sse_json(self, method: str, path: str, **kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+                transport=self.transport,
+            ) as client:
+                async with client.stream(method, path, **kwargs) as response:
+                    if response.is_error:
+                        await response.aread()
+                        raise self._response_error(response)
+                    async for line in response.aiter_lines():
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith(":") or not stripped.startswith("data:"):
+                            continue
+                        data = stripped[5:].strip()
+                        if data == "[DONE]":
+                            return
+                        try:
+                            event = json.loads(data)
+                        except json.JSONDecodeError as error:
+                            raise ProviderError(f"{self.provider_label} returned an invalid stream") from error
+                        if not isinstance(event, dict):
+                            raise ProviderError(f"{self.provider_label} returned an invalid stream")
+                        yield event
+        except ProviderError:
+            raise
+        except httpx.TimeoutException as error:
+            raise ProviderError(f"{self.provider_label} request timed out", retryable=True) from error
+        except httpx.RequestError as error:
+            raise ProviderError(f"{self.provider_label} is unavailable", retryable=True) from error
 
     def _response_error(self, response: httpx.Response) -> ProviderError:
         if response.status_code in (401, 403):

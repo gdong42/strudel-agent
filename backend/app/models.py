@@ -104,6 +104,17 @@ class ChangeUndoResponse(BaseModel):
 AgentRunStatus = Literal["running", "needs_input", "completed", "failed", "cancelled"]
 AgentMessageRole = Literal["system", "user", "assistant", "tool"]
 ToolResultStatus = Literal["ok", "recoverable_error", "fatal_error"]
+AgentActivityKind = Literal["model_turn", "commentary", "tool", "editor_update", "user_input"]
+AgentActivityStatus = Literal["running", "completed", "cancelled"]
+AgentActivityTool = Literal[
+    "inspect_diff",
+    "validate_candidate",
+    "lookup_samples",
+    "inspect_sample_usage",
+    "finalize_change",
+    "request_user_input",
+    "agent_tool",
+]
 
 
 class EditorVersion(BaseModel):
@@ -111,6 +122,43 @@ class EditorVersion(BaseModel):
 
     code: str
     hash: str = Field(min_length=1)
+
+
+class AgentActivity(BaseModel):
+    """Browser-safe progress metadata. It never contains model or tool payloads."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    sequence: int = Field(ge=1)
+    kind: AgentActivityKind
+    status: AgentActivityStatus
+    started_at: int = Field(alias="startedAt", ge=0)
+    completed_at: int | None = Field(default=None, alias="completedAt", ge=0)
+    turn: int | None = Field(default=None, ge=1)
+    tool: AgentActivityTool | None = None
+    message: str | None = Field(default=None, min_length=1, max_length=280)
+
+    @model_validator(mode="after")
+    def validate_activity_shape(self) -> "AgentActivity":
+        if self.kind == "model_turn" and self.turn is None:
+            raise ValueError("Model turn activities require a turn")
+        if self.kind != "model_turn" and self.turn is not None:
+            raise ValueError("Only model turn activities may include a turn")
+        if self.kind == "tool" and self.tool is None:
+            raise ValueError("Tool activities require a tool")
+        if self.kind != "tool" and self.tool is not None:
+            raise ValueError("Only tool activities may include a tool")
+        if self.kind == "commentary" and self.message is None:
+            raise ValueError("Commentary activities require a message")
+        if self.kind != "commentary" and self.message is not None:
+            raise ValueError("Only commentary activities may include a message")
+        if self.status == "running" and self.completed_at is not None:
+            raise ValueError("Running activities cannot have completedAt")
+        if self.status != "running" and self.completed_at is None:
+            raise ValueError("Finished activities require completedAt")
+        if self.completed_at is not None and self.completed_at < self.started_at:
+            raise ValueError("Activity completedAt cannot precede startedAt")
+        return self
 
 
 class AgentQuestionOption(BaseModel):
@@ -343,6 +391,7 @@ class AgentRun(BaseModel):
     updated_at: int = Field(alias="updatedAt", ge=0)
     budget: AgentRunBudget
     usage: AgentRunUsage = Field(default_factory=AgentRunUsage)
+    activities: list[AgentActivity] = Field(default_factory=list)
     messages: list[AgentMessage] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list, alias="toolResults")
     final_change: AgentFinalChange | None = Field(default=None, alias="finalChange")
@@ -377,6 +426,7 @@ class AgentRun(BaseModel):
             question=self.pending_input.to_public_question() if self.status == "needs_input" and self.pending_input else None,
             finalChange=self.final_change if self.status == "completed" else None,
             error=self.failure if self.status == "failed" else None,
+            activities=[activity.model_copy(deep=True) for activity in self.activities],
         )
 
 
@@ -390,6 +440,7 @@ class AgentRunPublic(BaseModel):
     question: AgentQuestion | None = None
     final_change: AgentFinalChange | None = Field(default=None, alias="finalChange")
     error: AgentRunFailure | None = None
+    activities: list[AgentActivity] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_public_status_shape(self) -> "AgentRunPublic":

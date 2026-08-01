@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models import (
+    AgentActivity,
     AgentFinalChange,
     AgentMessage,
     AgentRun,
@@ -117,9 +118,61 @@ def test_agent_run_public_projection_hides_internal_state() -> None:
         },
         "finalChange": None,
         "error": None,
+        "activities": [],
     }
     assert "PRIVATE" not in public_json
     assert "secret" not in public_json
+
+
+def test_agent_activity_contract_accepts_only_fixed_public_metadata() -> None:
+    activity = AgentActivity(
+        sequence=1,
+        kind="tool",
+        status="completed",
+        startedAt=10,
+        completedAt=11,
+        tool="validate_candidate",
+    )
+
+    assert activity.model_dump(by_alias=True) == {
+        "sequence": 1,
+        "kind": "tool",
+        "status": "completed",
+        "startedAt": 10,
+        "completedAt": 11,
+        "turn": None,
+        "tool": "validate_candidate",
+        "message": None,
+    }
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        AgentActivity(
+            sequence=2,
+            kind="tool",
+            status="completed",
+            startedAt=10,
+            completedAt=11,
+            tool="inspect_diff",
+            content='PRIVATE candidate s("secret")',
+        )
+
+    commentary = AgentActivity(
+        sequence=2,
+        kind="commentary",
+        status="running",
+        startedAt=12,
+        message="Reviewing the groove.",
+    )
+    assert commentary.model_dump(by_alias=True)["message"] == "Reviewing the groove."
+    with pytest.raises(ValidationError, match="Only commentary activities"):
+        AgentActivity(
+            sequence=3,
+            kind="tool",
+            status="completed",
+            startedAt=13,
+            completedAt=13,
+            tool="inspect_diff",
+            message="PRIVATE tool result",
+        )
 
 
 def test_agent_run_requires_only_status_appropriate_payloads() -> None:

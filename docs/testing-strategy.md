@@ -127,6 +127,8 @@ results, not assert a model's private reasoning.
 | 8 | Provider/tool returns malformed data | Runtime records a sanitized failure or recoverable tool result without leaking credentials |
 | 9 | A Run contributes session conversation data | Only intent, public clarification, final explanation, and safe outcome enter bounded revision context; code, tools, credentials, and hidden reasoning do not |
 | 10 | A Run or Change lifecycle event is persisted | Audit links IDs and safe outcome metadata while excluding raw input, code, credentials, provider payloads, and hidden reasoning |
+| 11 | A model turn streams commentary and calls tools | Public activity reports bounded commentary and fixed model/tool metadata while excluding candidate code, reasoning, tool arguments/results, and raw provider payloads |
+| 12 | OpenAI or DeepSeek returns streamed text, reasoning, and tool-call deltas | Only public content reaches the commentary callback; the complete normalized tool turn is reconstructed privately |
 
 ---
 
@@ -224,6 +226,7 @@ It should also dispatch the same `update` event expected by the app.
 | 13 | Cancelled Run | Editor, playback, snapshot, and change history remain unchanged |
 | 14 | Completed Manual Fire run | One final change is staged with final diff/explanation; no evaluate call |
 | 15 | Completed Auto Fire run passes gates | Final change evaluates once; failed gates return to the agent or block completion |
+| 16 | Agent Run is active, streams commentary, then reconnects | Timeline shows elapsed/turn/commentary/tool progress without private payloads and restores the bounded activity history after reconnect |
 
 ### 5.4 Real REPL smoke tests
 

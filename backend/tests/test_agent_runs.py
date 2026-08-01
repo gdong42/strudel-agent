@@ -84,6 +84,110 @@ async def test_manager_drives_multiple_turns_to_a_final_public_change() -> None:
 
 
 @pytest.mark.anyio
+async def test_manager_streams_bounded_public_commentary_without_private_provider_data() -> None:
+    first_commentary = asyncio.Event()
+    release_provider = asyncio.Event()
+    updates: list[AgentRunPublic] = []
+
+    class StreamingProvider:
+        async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            raise AssertionError("The manager should use the streaming provider extension")
+
+        async def next_turn_stream(self, request: ModelTurnRequest, on_commentary) -> ModelTurnResult:
+            await on_commentary("Reviewing the current groove.")
+            first_commentary.set()
+            await release_provider.wait()
+            await on_commentary("Reviewing the current groove before finalization.")
+            return ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    content="Reviewing the current groove before finalization.",
+                    toolCalls=[
+                        ToolCall(
+                            id="final-stream",
+                            name="finalize_change",
+                            arguments={
+                                "code": 's("bd*4")',
+                                "explanation": "Added a four-on-the-floor kick.",
+                                "action": "apply",
+                                "warnings": [],
+                            },
+                        )
+                    ],
+                )
+            )
+
+        async def test_connection(self) -> None:
+            return None
+
+    async def record_update(update: AgentRunPublic) -> None:
+        updates.append(update)
+
+    manager = AgentRunManager(on_update=record_update)
+    started = await start_run(manager, StreamingProvider())
+    await asyncio.wait_for(first_commentary.wait(), timeout=1)
+    running = await manager.get_public(started.id)
+
+    assert running is not None
+    assert running.status == "running"
+    commentary = [activity for activity in running.activities if activity.kind == "commentary"]
+    assert len(commentary) == 1
+    assert commentary[0].status == "running"
+    assert commentary[0].message == "Reviewing the current groove."
+    running_json = running.model_dump_json(by_alias=True)
+    assert 's(\\"bd*4\\")' not in running_json
+
+    release_provider.set()
+    completed = await manager.wait(started.id)
+
+    assert completed is not None
+    assert completed.status == "completed"
+    final_commentary = [activity for activity in completed.activities if activity.kind == "commentary"]
+    assert len(final_commentary) == 1
+    assert final_commentary[0].status == "completed"
+    assert final_commentary[0].message == "Reviewing the current groove before finalization."
+    assert [activity.kind for activity in completed.activities] == ["model_turn", "commentary", "tool"]
+    assert any(
+        activity.kind == "commentary" and activity.status == "running"
+        for update in updates
+        for activity in update.activities
+    )
+
+
+@pytest.mark.anyio
+async def test_manager_cancels_an_active_streaming_commentary() -> None:
+    commentary_started = asyncio.Event()
+
+    class BlockingStreamingProvider:
+        async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            raise AssertionError("The manager should use the streaming provider extension")
+
+        async def next_turn_stream(self, request: ModelTurnRequest, on_commentary) -> ModelTurnResult:
+            await on_commentary("Preparing a longer arrangement update.")
+            commentary_started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("Cancelled streaming provider resumed unexpectedly")
+
+        async def test_connection(self) -> None:
+            return None
+
+    manager = AgentRunManager()
+    started = await start_run(manager, BlockingStreamingProvider())
+    await asyncio.wait_for(commentary_started.wait(), timeout=1)
+
+    cancelled = await manager.cancel(started.id)
+
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    active_activities = [
+        activity for activity in cancelled.activities if activity.kind in {"model_turn", "commentary"}
+    ]
+    assert [activity.kind for activity in active_activities] == ["model_turn", "commentary"]
+    assert all(activity.status == "cancelled" for activity in active_activities)
+    assert all(activity.completed_at is not None for activity in active_activities)
+
+
+@pytest.mark.anyio
 async def test_manager_supplies_prior_safe_conversation_context_to_the_next_run() -> None:
     provider = ScriptedAgentProvider(
         [
@@ -222,7 +326,21 @@ async def test_manager_reopens_a_completed_run_for_a_stale_final_editor_update()
     assert final_completed.status == "completed"
     assert final_completed.final_change is not None
     assert final_completed.final_change.code == 's("hh*8")'
-    assert [update.status for update in updates] == ["running", "completed", "running", "completed"]
+    assert [update.status for update in updates] == [
+        "running",
+        "running",
+        "completed",
+        "running",
+        "running",
+        "completed",
+    ]
+    assert [activity.kind for activity in updates[-1].activities] == [
+        "model_turn",
+        "tool",
+        "editor_update",
+        "model_turn",
+        "tool",
+    ]
     assert json.loads(provider.requests[-1].messages[-1].content) == {
         "editorUpdate": {
             "baseHash": "editor-hash",
@@ -342,7 +460,7 @@ async def test_manager_persists_a_completed_final_only_after_a_matching_stage_ac
 
 
 @pytest.mark.anyio
-async def test_manager_publishes_only_public_lifecycle_changes() -> None:
+async def test_manager_publishes_safe_model_and_tool_activity() -> None:
     updates: list[AgentRunPublic] = []
 
     async def record_update(update: AgentRunPublic) -> None:
@@ -386,12 +504,22 @@ async def test_manager_publishes_only_public_lifecycle_changes() -> None:
     started = await start_run(manager, provider)
     await manager.wait(started.id)
 
-    assert [update.status for update in updates] == ["running", "completed"]
+    assert [update.status for update in updates] == ["running", "running", "running", "running", "completed"]
     assert all(
-        set(update.model_dump(by_alias=True)) == {"id", "status", "question", "finalChange", "error"}
+        set(update.model_dump(by_alias=True)) == {"id", "status", "question", "finalChange", "error", "activities"}
         for update in updates
     )
-    assert "inspect_diff" not in json.dumps([update.model_dump(by_alias=True) for update in updates])
+    assert updates[0].activities == []
+    assert updates[1].activities[-1].kind == "model_turn"
+    assert updates[1].activities[-1].status == "running"
+    assert [activity.kind for activity in updates[-1].activities] == ["model_turn", "tool", "model_turn", "tool"]
+    assert [activity.tool for activity in updates[-1].activities if activity.kind == "tool"] == [
+        "inspect_diff",
+        "finalize_change",
+    ]
+    intermediate_json = json.dumps([update.model_dump(by_alias=True) for update in updates[:-1]])
+    assert "bd*4" not in intermediate_json
+    assert "candidateCode" not in intermediate_json
 
 
 @pytest.mark.anyio
@@ -515,7 +643,23 @@ async def test_manager_resumes_a_paused_run_with_the_latest_editor_context() -> 
     assert resumed.status == "running"
     assert completed is not None
     assert completed.status == "completed"
-    assert [update.status for update in updates] == ["running", "needs_input", "running", "completed"]
+    assert [update.status for update in updates] == [
+        "running",
+        "running",
+        "needs_input",
+        "needs_input",
+        "running",
+        "running",
+        "completed",
+    ]
+    assert [activity.kind for activity in updates[-1].activities] == [
+        "model_turn",
+        "tool",
+        "editor_update",
+        "user_input",
+        "model_turn",
+        "tool",
+    ]
     assert json.loads(provider.requests[-1].messages[-1].content) == {
         "userInput": {"questionId": "tempo", "answer": "Keep it at 124."},
         "editorVersion": {"code": 's("bd*4")', "hash": "latest-hash"},
@@ -622,7 +766,7 @@ async def test_manager_publishes_one_cancelled_update_for_a_paused_run() -> None
 
     assert cancelled is not None
     assert cancelled.status == "cancelled"
-    assert [update.status for update in updates] == ["running", "needs_input", "cancelled"]
+    assert [update.status for update in updates] == ["running", "running", "needs_input", "cancelled"]
 
 
 @pytest.mark.anyio

@@ -101,6 +101,9 @@ workflow.
 - [x] **P4C.8.3** Retire the legacy one-shot change generation path and fixed reconciliation contracts after Run migration coverage
 - [x] **P4C.9.1** Cover cancellation, stale finals, and final-only staging in Mock-REPL E2E
 - [x] **P4C.9.2** Cover failed terminal Runs in Mock-REPL E2E without editor, playback, or history mutation
+- [x] **P4C.10.1** Stream bounded browser-safe model-turn and tool activity and restore it after reconnect
+- [x] **P4C.10.2** Render elapsed time, turn state, and tool activity in the Agent panel
+- [x] **P4C.10.3** Add provider token streaming for explicitly public assistant commentary without exposing raw provider output
 
 ### Phase 4D: Human-in-the-Loop Clarification
 

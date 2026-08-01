@@ -75,6 +75,14 @@ terms. Internal candidates, self-review, recoverable validation failures, and
 revision attempts are agent working state and should not become user-facing
 review tasks.
 
+Long-running work should still feel live. While a Run is active, the interface
+shows elapsed time, the current model turn, and normalized activity such as an
+allowlisted tool name. This timeline is progress feedback, not a transcript or
+an approval queue. It may stream short assistant commentary explicitly written
+for the user, while candidate code, arbitrary model output, tool payloads, and
+hidden reasoning remain private until the agent produces a final result or asks
+a material clarification.
+
 ### Agent Apply Mode
 
 The product should expose only two agent apply modes:
@@ -89,7 +97,7 @@ The product should expose only two agent apply modes:
 When the user gives a natural language prompt in `Manual Fire` mode:
 
 1. Start an Agent Run with the current editor version, musical context, and user intent.
-2. The agent generates candidates, uses available tools to inspect diffs and validate them, and revises recoverable problems internally.
+2. The agent generates candidates, uses available tools to inspect diffs and validate them, and revises recoverable problems internally while the UI shows normalized progress.
 3. If a material ambiguity, constraint conflict, or key creative decision remains, pause the run and ask one concise question. Resume the same run after the answer.
 4. When the agent has a finalized result, stage only that result in the editor.
 5. Show the final diff, musical explanation, and only irreducible risks or unverifiable limitations.
@@ -339,6 +347,10 @@ The current single-file POC can stay as a reference, but formal development shou
 
 - Replace one-shot generation with a vendor-neutral model-turn and tool-call contract.
 - Add a bounded Agent Run loop with tool execution, cancellation, finalization, and public run states.
+- Stream a bounded browser-safe activity timeline with model-turn progress,
+  elapsed time, and allowlisted tool names; restore it after reconnect.
+- Stream throttled public commentary from provider content channels while
+  excluding reasoning events, tool arguments, and raw provider payloads.
 - Keep candidates and recoverable findings internal; persist and stage only completed final changes.
 - Add `needs_input` pause/resume for material ambiguity, conflicting constraints, and key creative decisions.
 - Feed concurrent editor updates into the active run so the agent reconciles and self-reviews again.
@@ -381,6 +393,7 @@ The formal project is viable when:
 - The performer can inspect, edit, undo, revise, and fire staged changes.
 - The agent repairs recoverable candidate problems internally and stages only a finalized result.
 - The agent asks the performer only for material clarification or a key decision, then resumes the same run.
+- Long-running model work immediately shows elapsed time, live public commentary, and safe tool activity.
 - A cancelled, failed, stale, or budget-exhausted run never changes the editor, playback, snapshots, or change history.
 - A bad agent change does not destroy the active performance state.
 - The last good version is always recoverable.

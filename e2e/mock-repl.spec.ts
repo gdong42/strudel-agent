@@ -293,6 +293,102 @@ test('Auto Fire keeps a final with risk warnings staged for manual review', asyn
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
 });
 
+test('agent activity timeline shows live model progress and safe tool names', async ({ page }) => {
+  const startedAt = Math.floor(Date.now() / 1000) - 3;
+  const runningRun = {
+    id: 'activity-run',
+    status: 'running',
+    question: null,
+    finalChange: null,
+    error: null,
+    activities: [
+      {
+        sequence: 1,
+        kind: 'model_turn',
+        status: 'running',
+        startedAt,
+        completedAt: null,
+        turn: 1,
+        tool: null,
+        message: null,
+      },
+    ],
+  };
+  const progressedRun = {
+    ...runningRun,
+    activities: [
+      { ...runningRun.activities[0], status: 'completed', completedAt: startedAt + 1 },
+      {
+        sequence: 2,
+        kind: 'commentary',
+        status: 'completed',
+        startedAt,
+        completedAt: startedAt + 1,
+        turn: null,
+        tool: null,
+        message: 'Balancing the drums before validation.',
+      },
+      {
+        sequence: 3,
+        kind: 'tool',
+        status: 'completed',
+        startedAt: startedAt + 1,
+        completedAt: startedAt + 1,
+        turn: null,
+        tool: 'inspect_diff',
+        message: null,
+      },
+      {
+        sequence: 4,
+        kind: 'model_turn',
+        status: 'running',
+        startedAt: startedAt + 1,
+        completedAt: null,
+        turn: 2,
+        tool: null,
+        message: null,
+      },
+    ],
+  };
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/activity-run') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(progressedRun) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/activity-run/cancel') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ...progressedRun, status: 'cancelled' }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await page.locator('#agent-intent').fill('make a long transition');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.locator('#agent-activity')).toBeVisible();
+  await expect(page.locator('#agent-activity-summary')).toContainText('Working · Turn 2');
+  await expect(page.locator('#agent-activity-list')).toContainText('Generating change');
+  await expect(page.locator('#agent-activity-list')).toContainText('Balancing the drums before validation.');
+  await expect(page.locator('#agent-activity-list')).toContainText('Reviewing code changes');
+  await expect(page.locator('#agent-activity-list')).toContainText('inspect_diff');
+  await expect(page.locator('#agent-activity-list')).toContainText('Revising change');
+  await expect(page.locator('#agent-activity-list')).not.toContainText('candidateCode');
+  await expect(page.locator('#agent-activity-list')).not.toContainText('PRIVATE reasoning');
+
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('#agent-activity-summary')).toContainText('Cancelled');
+});
+
 test('editor updates reach an active Agent Run in accepted-hash order', async ({ page }) => {
   const runningRun = { id: 'sync-run', status: 'running', question: null, finalChange: null, error: null };
   const editorUpdates: Array<{ baseHash: string; editorVersion: { code: string; hash: string } }> = [];
@@ -505,6 +601,28 @@ test('a clarification answer resumes the same Run after syncing the latest edito
     },
     finalChange: null,
     error: null,
+    activities: [
+      {
+        sequence: 1,
+        kind: 'model_turn',
+        status: 'completed',
+        startedAt: Math.floor(Date.now() / 1000) - 2,
+        completedAt: Math.floor(Date.now() / 1000) - 1,
+        turn: 1,
+        tool: null,
+        message: null,
+      },
+      {
+        sequence: 2,
+        kind: 'tool',
+        status: 'completed',
+        startedAt: Math.floor(Date.now() / 1000) - 1,
+        completedAt: Math.floor(Date.now() / 1000) - 1,
+        turn: null,
+        tool: 'request_user_input',
+        message: null,
+      },
+    ],
   };
   const runningRun = { ...pausedRun, status: 'running', question: null };
   const commands: string[] = [];
@@ -574,6 +692,28 @@ test('a browser reload restores a paused Agent Run without storing credentials',
     },
     finalChange: null,
     error: null,
+    activities: [
+      {
+        sequence: 1,
+        kind: 'model_turn',
+        status: 'completed',
+        startedAt: Math.floor(Date.now() / 1000) - 2,
+        completedAt: Math.floor(Date.now() / 1000) - 1,
+        turn: 1,
+        tool: null,
+        message: null,
+      },
+      {
+        sequence: 2,
+        kind: 'tool',
+        status: 'completed',
+        startedAt: Math.floor(Date.now() / 1000) - 1,
+        completedAt: Math.floor(Date.now() / 1000) - 1,
+        turn: null,
+        tool: 'request_user_input',
+        message: null,
+      },
+    ],
   };
   let runReads = 0;
   await page.addInitScript((run) => {
@@ -598,6 +738,8 @@ test('a browser reload restores a paused Agent Run without storing credentials',
   await expect(page.locator('#agent-question')).toBeVisible();
   await page.reload();
   await expect(page.locator('#agent-question')).toBeVisible();
+  await expect(page.locator('#agent-activity-list')).toContainText('Preparing a clarification');
+  await expect(page.locator('#agent-activity-list')).toContainText('request_user_input');
   await expect.poll(() => runReads).toBeGreaterThanOrEqual(2);
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('strudel-agent.active-run.v1'))).not.toContain('apiKey');
 

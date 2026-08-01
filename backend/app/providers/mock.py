@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from ..models import AgentMessage, ModelTurnRequest, ModelTurnResult, ModelUsage, ToolCall
-from .base import ProviderError
+from .base import ModelCommentaryCallback, ProviderError
 
 
 class MockProvider:
@@ -32,6 +32,14 @@ class MockProvider:
             ),
             usage=ModelUsage(),
         )
+
+    async def next_turn_stream(
+        self,
+        request: ModelTurnRequest,
+        on_commentary: ModelCommentaryCallback,
+    ) -> ModelTurnResult:
+        await on_commentary("Preparing a local mock change.")
+        return await self.next_turn(request)
 
     async def test_connection(self) -> None:
         return None

@@ -24,7 +24,7 @@ from .models import (
     ToolResult,
 )
 from .prompt_contract import build_agent_runtime_system_prompt
-from .providers.base import AgentProvider, ProviderError
+from .providers.base import AgentProvider, ModelCommentaryCallback, ProviderError
 from .tools import ToolRegistry
 
 
@@ -303,6 +303,7 @@ async def execute_model_turn(
     *,
     now: int | None = None,
     cancellation: AgentRunCancellation | None = None,
+    on_commentary: ModelCommentaryCallback | None = None,
 ) -> AgentRun:
     """Run one provider turn and append its ordered tool observations privately."""
 
@@ -322,7 +323,7 @@ async def execute_model_turn(
         remainingTokenBudget=remaining_token_budget,
     )
     try:
-        result = await _await_provider_turn(provider, request, cancellation)
+        result = await _await_provider_turn(provider, request, cancellation, on_commentary)
     except ProviderError as error:
         if cancellation and cancellation.is_cancelled:
             return cancel_agent_run(run, now=_timestamp(now))
@@ -378,11 +379,13 @@ async def _await_provider_turn(
     provider: AgentProvider,
     request: ModelTurnRequest,
     cancellation: AgentRunCancellation | None,
+    on_commentary: ModelCommentaryCallback | None,
 ) -> ModelTurnResult | object:
+    provider_turn = _next_provider_turn(provider, request, on_commentary)
     if cancellation is None:
-        return await provider.next_turn(request)
+        return await provider_turn
 
-    provider_task = asyncio.create_task(provider.next_turn(request))
+    provider_task = asyncio.create_task(provider_turn)
     cancellation_task = asyncio.create_task(cancellation.wait())
     try:
         await asyncio.wait({provider_task, cancellation_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -395,6 +398,17 @@ async def _await_provider_turn(
         if not cancellation_task.done():
             cancellation_task.cancel()
         await asyncio.gather(provider_task, cancellation_task, return_exceptions=True)
+
+
+async def _next_provider_turn(
+    provider: AgentProvider,
+    request: ModelTurnRequest,
+    on_commentary: ModelCommentaryCallback | None,
+) -> ModelTurnResult:
+    streaming_turn = getattr(provider, "next_turn_stream", None)
+    if on_commentary is not None and callable(streaming_turn):
+        return await streaming_turn(request, on_commentary)
+    return await provider.next_turn(request)
 
 
 def _handle_terminal_tool(run: AgentRun, call: ToolCall, tools: ToolRegistry, *, now: int | None) -> AgentRun:

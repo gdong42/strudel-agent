@@ -10,6 +10,11 @@ from app.providers.base import ProviderError
 from app.providers.openai import OpenAIProvider
 
 
+def stream_response(events: list[dict]) -> httpx.Response:
+    body = "\n\n".join([*(f"data: {json.dumps(event)}" for event in events), "data: [DONE]"])
+    return httpx.Response(200, text=f"{body}\n\n", headers={"content-type": "text/event-stream"})
+
+
 @pytest.mark.anyio
 async def test_openai_provider_normalizes_a_model_turn_and_tool_calls() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -86,6 +91,66 @@ async def test_openai_provider_normalizes_a_model_turn_and_tool_calls() -> None:
     assert result.usage.input_tokens == 120
     assert result.usage.output_tokens == 30
     assert result.provider_request_id == "resp-1"
+
+
+@pytest.mark.anyio
+async def test_openai_provider_streams_only_public_text_and_rebuilds_the_final_turn() -> None:
+    private_arguments = json.dumps({"candidateCode": 's("private")'})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["stream"] is True
+        return stream_response([
+            {"type": "response.output_text.delta", "delta": "Reviewing the arrangement "},
+            {"type": "response.reasoning_text.delta", "delta": "PRIVATE reasoning"},
+            {"type": "response.function_call_arguments.delta", "delta": private_arguments},
+            {"type": "response.output_text.delta", "delta": "before validation."},
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-stream-1",
+                    "usage": {"input_tokens": 80, "output_tokens": 20},
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{
+                                "type": "output_text",
+                                "text": "Reviewing the arrangement before validation.",
+                            }],
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "call-stream-1",
+                            "name": "validate_candidate",
+                            "arguments": private_arguments,
+                        },
+                    ],
+                },
+            },
+        ])
+
+    snapshots: list[str] = []
+
+    async def record_commentary(commentary: str) -> None:
+        snapshots.append(commentary)
+
+    result = await OpenAIProvider("test-key", transport=httpx.MockTransport(handler)).next_turn_stream(
+        ModelTurnRequest(messages=[], tools=[], model="runtime-model", remainingTokenBudget=200),
+        record_commentary,
+    )
+
+    assert snapshots[-1] == "Reviewing the arrangement before validation."
+    assert "PRIVATE" not in "".join(snapshots)
+    assert "candidateCode" not in "".join(snapshots)
+    assert result.assistant_message.tool_calls == [
+        ToolCall(
+            id="call-stream-1",
+            name="validate_candidate",
+            arguments={"candidateCode": 's("private")'},
+        )
+    ]
+    assert result.provider_request_id == "resp-stream-1"
+    assert result.usage.total_tokens == 100
 
 
 @pytest.mark.anyio
