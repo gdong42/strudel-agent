@@ -13,10 +13,10 @@ has three layers: deterministic final/region checks, Agent Run tool/loop
 observations, and separately entered human musical review.
 
 The deterministic assessment already compares the final outcome with the
-scenario expectation, checks marked regions, and runs the existing
-non-performing `validate_candidate` gate. Its `syntaxValid` field means that
-current gate passed; it is not a substitute for the deeper Strudel validation
-work planned for Phase 5.
+scenario expectation, checks marked regions, and runs the non-performing
+`validate_candidate` gate. Its `syntaxValid` field means the pinned JavaScript
+and Mini Notation parsers accepted the candidate; it does not guarantee browser
+resource availability, successful WebAudio evaluation, or musical quality.
 
 `execute_scenario()` accepts an explicit Provider and runs the scenario in an
 isolated Agent Run. Its safe report includes terminal/action outcome, whether a

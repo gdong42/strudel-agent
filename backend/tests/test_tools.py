@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.models import ToolCall
 from app.samples import DeclaredSample, LoadedSampleRegistry, SampleRegistry, SampleRegistryError
 from app.strudel_docs import StrudelDocsError
+from app.strudel_validation import StrudelValidatorUnavailable
 from app.tools import ToolRegistry
 
 
@@ -64,13 +65,51 @@ def test_validate_candidate_returns_recoverable_errors_and_mini_notation_warning
     assert result.output["valid"] is False
     assert {error["code"] for error in result.output["errors"]} == {
         "dynamic_execution",
-        "unbalanced_delimiters",
+        "javascript_syntax",
     }
     assert result.output["warnings"] == [{
         "level": "warn",
         "category": "mini-notation",
         "message": "Pattern-like mini-notation should use double quotes or backticks, not single quotes.",
     }]
+
+
+def test_validate_candidate_uses_the_pinned_mini_notation_parser() -> None:
+    result = ToolRegistry().execute(
+        ToolCall(
+            id="call-1",
+            name="validate_candidate",
+            arguments={"candidateCode": 's("bd*4,")'},
+        )
+    )
+
+    assert result.status == "recoverable_error"
+    assert result.output["valid"] is False
+    assert result.output["errors"][0]["code"] == "mini_notation_syntax"
+    assert result.output["errors"][0]["line"] == 1
+    assert result.output["errors"][0]["column"] == 9
+
+
+def test_validate_candidate_blocks_finalization_when_the_static_validator_is_unavailable() -> None:
+    def unavailable_validator(_: str):
+        raise StrudelValidatorUnavailable("missing node")
+
+    result = ToolRegistry(candidate_validator=unavailable_validator).execute(
+        ToolCall(
+            id="call-1",
+            name="validate_candidate",
+            arguments={"candidateCode": 's("bd*4")'},
+        )
+    )
+
+    assert result.status == "recoverable_error"
+    assert result.output["valid"] is False
+    assert result.output["errors"] == [
+        {
+            "code": "validator_unavailable",
+            "message": "The pinned local Strudel syntax validator could not run.",
+        }
+    ]
 
 
 def test_lookup_samples_filters_a_declared_local_registry() -> None:

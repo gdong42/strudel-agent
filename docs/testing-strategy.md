@@ -90,6 +90,7 @@ results, not assert a model's private reasoning.
 | `backend/app/prompt_contract.py` | Shared Agent Runtime instructions |
 | `backend/app/project_context.py` | Optional context loading, project-root confinement, UTF-8, and size limits |
 | `backend/app/strudel_docs.py` | Checked-in corpus integrity, exact-symbol ranking, tutorial retrieval, result bounds, and offline failure handling |
+| `backend/app/strudel_validation.py` | Node protocol bounds, JavaScript and Mini Notation errors, final-expression checks, no-execution behavior, and unavailable-validator failure |
 | `backend/app/samples.py` | Versioned manifest validation, path confinement, missing-registry behavior, and stable declared-sound ordering |
 | `backend/app/tools/` | Tool argument validation, deterministic results, offline Strudel reference lookup, declared-sample lookup/inspection, and recoverable/fatal errors |
 | `backend/app/providers/` | Normalized model turns, tool calls, usage, and vendor error mapping |
@@ -131,6 +132,8 @@ results, not assert a model's private reasoning.
 | 11 | A model turn streams commentary and calls tools | Public activity reports bounded commentary and fixed model/tool metadata while excluding candidate code, reasoning, tool arguments/results, and raw provider payloads |
 | 12 | OpenAI or DeepSeek returns streamed text, reasoning, and tool-call deltas | Only public content reaches the commentary callback; the complete normalized tool turn is reconstructed privately |
 | 13 | Model calls `lookup_strudel_docs` with an exact function symbol | The pinned local result and examples enter private tool history; only a fixed tool-activity label is public |
+| 14 | Candidate has invalid JavaScript or Mini Notation | Parser error category and line/column enter private tool history; finalization is rejected and the Agent revises internally |
+| 15 | Static validator process cannot start, times out, or returns malformed output | Validation fails closed without exposing process details or staging unchecked code |
 
 ---
 
@@ -374,7 +377,7 @@ rubric. It does not prescribe hidden reasoning, intermediate candidates, or an
 exact source-code response.
 
 The deterministic assessor records terminal/action checks, marked-region checks,
-and the current non-performing validation gate without calling a provider. The
+and the static JavaScript/Mini Notation validation gate without calling a provider. The
 provider-runner is exercised with scripted model turns and projects only safe
 loop/tool observations into a report. Human review is separate, limited to the
 scenario's fixed rubric, a numerical quality score, and readiness status; it has

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ..models import AgentFinalChange, RequestUserInput, ToolCall, ToolDefinition, ToolResult
 from ..samples import LoadedSampleRegistry, SampleRegistryError, declared_samples, load_sample_registry
 from ..strudel_docs import StrudelDocsError, StrudelKnowledgeBase, load_strudel_knowledge
+from ..strudel_validation import StrudelValidatorUnavailable, validate_strudel_code
 
 
 class InspectDiffArguments(BaseModel):
@@ -83,8 +84,6 @@ _DIRECT_SOUND_CALL = re.compile(
     re.DOTALL,
 )
 _SOUND_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
-_OPENING_DELIMITERS = {"(": ")", "[": "]", "{": "}"}
-_CLOSING_DELIMITERS = {value: key for key, value in _OPENING_DELIMITERS.items()}
 _WARNING_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -118,9 +117,11 @@ class ToolRegistry:
         *,
         sample_registry_loader: Callable[[], LoadedSampleRegistry] = load_sample_registry,
         strudel_knowledge_loader: Callable[[], StrudelKnowledgeBase] = load_strudel_knowledge,
+        candidate_validator: Callable[[str], list[dict[str, Any]]] = validate_strudel_code,
     ) -> None:
         self._sample_registry_loader = sample_registry_loader
         self._strudel_knowledge_loader = strudel_knowledge_loader
+        self._candidate_validator = candidate_validator
         self._definitions = {
             "inspect_diff": ToolDefinition(
                 name="inspect_diff",
@@ -137,7 +138,10 @@ class ToolRegistry:
             ),
             "validate_candidate": ToolDefinition(
                 name="validate_candidate",
-                description="Check candidate Strudel code for empty content, dynamic execution, delimiter balance, and mini-notation warnings.",
+                description=(
+                    "Statically validate candidate code with the pinned JavaScript and Strudel Mini Notation parsers, "
+                    "plus runtime safety checks. This does not execute or play the candidate."
+                ),
                 inputSchema={
                     "type": "object",
                     "additionalProperties": False,
@@ -292,7 +296,7 @@ class ToolRegistry:
     def _validate_candidate(self, call: ToolCall) -> ToolResult:
         arguments = ValidateCandidateArguments.model_validate(call.arguments)
         code = arguments.candidate_code
-        errors: list[dict[str, str]] = []
+        errors: list[dict[str, Any]] = []
         warnings: list[dict[str, str]] = []
         if not code.strip():
             errors.append({"code": "empty_code", "message": "Candidate code is empty."})
@@ -305,9 +309,16 @@ class ToolRegistry:
                     "message": "Candidate code uses eval() or Function(), which is not allowed.",
                 }
             )
-        delimiter_error = _delimiter_error(executable_code)
-        if delimiter_error:
-            errors.append({"code": "unbalanced_delimiters", "message": delimiter_error})
+        if code.strip():
+            try:
+                errors.extend(self._candidate_validator(code))
+            except StrudelValidatorUnavailable:
+                errors.append(
+                    {
+                        "code": "validator_unavailable",
+                        "message": "The pinned local Strudel syntax validator could not run.",
+                    }
+                )
         if _SINGLE_QUOTED_PATTERN_CALL.search(code):
             warnings.append(
                 {
@@ -480,21 +491,6 @@ def _strip_literals_and_comments(code: str) -> str:
         result.append(current)
         index += 1
     return "".join(result)
-
-
-def _delimiter_error(code: str) -> str | None:
-    stack: list[tuple[str, int]] = []
-    for index, character in enumerate(code):
-        if character in _OPENING_DELIMITERS:
-            stack.append((character, index))
-        elif character in _CLOSING_DELIMITERS:
-            if not stack or stack[-1][0] != _CLOSING_DELIMITERS[character]:
-                return f"Unexpected '{character}' at character {index}."
-            stack.pop()
-    if stack:
-        character, index = stack[-1]
-        return f"Unclosed '{character}' at character {index}."
-    return None
 
 
 def _direct_sound_names(code: str) -> set[str]:

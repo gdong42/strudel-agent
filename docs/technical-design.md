@@ -248,8 +248,10 @@ Initial runtime tools:
 
 - `inspect_diff(base_code, candidate_code)`: return a deterministic diff for
   the agent's self-review.
-- `validate_candidate(candidate_code)`: run available non-performing syntax,
-  mini-notation, sample, structural, and safety checks.
+- `validate_candidate(candidate_code)`: parse JavaScript with the pinned Acorn
+  version, parse double-quoted and untagged-template patterns with Strudel's
+  pinned Mini Notation parser, require a final Pattern expression, and run
+  non-performing safety checks.
 - `lookup_strudel_docs(query, topics, symbols, limit)`: search the pinned local
   Strudel tutorials and function reference. Exact API names and aliases receive
   priority over broad text matches.
@@ -297,6 +299,28 @@ syntax or APIs warrant a query, uses the result to revise its candidate, and
 continues the existing validation/finalization loop. The browser may show a
 collapsed "Consulting the Strudel manual" activity, but never receives the
 query, excerpts, candidates, or tool result.
+
+#### Static Candidate Validation
+
+`backend/app/strudel_validation.py` invokes `scripts/validate_strudel.mjs` over
+a bounded JSON stdin/stdout protocol. The Node bridge imports the same Acorn
+and generated `@strudel/mini` parser versions installed by the pinned Strudel
+runtime. It parses but never evaluates candidate code, imports no audio engine,
+and has no API for filesystem or network access from the candidate.
+
+Validation reports stable error categories and one-based locations for
+JavaScript syntax, Mini Notation syntax, and a missing final top-level Pattern
+expression. Existing dynamic-execution rejection and single-quoted-pattern
+warnings remain in the Python tool boundary. Process startup, timeout, protocol,
+and output bounds fail closed as `validator_unavailable`, preventing an
+unchecked candidate from passing deterministic finalization. Successful results
+are cached by exact candidate code to avoid repeating the Node startup during
+self-review and finalization.
+
+This is a static syntax gate, not a WebAudio dry run. It does not prove that a
+function or sound exists, that a browser-only visual can initialize, or that the
+result is musically correct. Documentation lookup, sample inspection, REPL
+evaluation, and human listening retain those separate responsibilities.
 
 ### 6.5 Agent Run Lifecycle
 
@@ -591,6 +615,8 @@ GET  /samples                    List declared project samples (not live load st
 │   │   ├── run_audit.py
 │   │   ├── evaluations.py
 │   │   ├── prompt_contract.py
+│   │   ├── strudel_docs.py
+│   │   ├── strudel_validation.py
 │   │   ├── changes.py
 │   │   ├── tracks.py
 │   │   ├── snapshots.py
@@ -599,9 +625,7 @@ GET  /samples                    List declared project samples (not live load st
 │   │   ├── models.py
 │   │   ├── tools/
 │   │   │   ├── __init__.py
-│   │   │   ├── diff.py
-│   │   │   ├── validation.py
-│   │   │   └── finalization.py
+│   │   │   └── registry.py
 │   │   └── providers/
 │   │       ├── __init__.py
 │   │       ├── base.py
@@ -783,8 +807,9 @@ editor reconciliation.
 
 Scenario loading and deterministic assessment are tested without making model
 calls. The assessment checks terminal/action expectations, marked code regions,
-and the current non-performing `validate_candidate` gate. Its syntax-valid field
-means that gate passed, not that a full Strudel compiler has accepted the code.
+and the non-performing `validate_candidate` gate. Its syntax-valid field means
+the pinned JavaScript and Mini Notation parsers accepted the code; it does not
+claim that browser resources exist or that WebAudio evaluation will succeed.
 P4G.2.2 executes a scenario through an explicitly supplied provider in an
 isolated Agent Run and records safe terminal, usage, editor-update, and
 tool-name/status/error-code observations. P4G.2.3 adds separately entered human

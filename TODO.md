@@ -142,7 +142,7 @@ workflow.
 - [x] **P5.1.1** Define a versioned local sample registry and project-confined loader
 - [x] **P5.1.2** Expose declared samples through a deterministic Agent lookup/validation tool
 - [x] **P5.1.3** Surface declared samples through the local API and workspace UI
-- [ ] **P5.2** Upgrade heuristic candidate checks with available Strudel syntax and mini-notation validation
+- [x] **P5.2** Upgrade heuristic candidate checks with pinned JavaScript and Strudel Mini Notation parsers
 - [ ] **P5.3** Add richer visual and structural diff inspection tools for the agent's self-review
 - [ ] **P5.6** Add visual disable toggle and browser performance logging for audio-critical performance
 - [ ] **P5.7** Panic flow: confirm dialog → stop audio → clear visuals → optional REPL reload
