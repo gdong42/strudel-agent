@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..models import AgentFinalChange, RequestUserInput, ToolCall, ToolDefinition, ToolResult
 from ..samples import LoadedSampleRegistry, SampleRegistryError, declared_samples, load_sample_registry
+from ..strudel_docs import StrudelDocsError, StrudelKnowledgeBase, load_strudel_knowledge
 
 
 class InspectDiffArguments(BaseModel):
@@ -30,6 +31,15 @@ class LookupSamplesArguments(BaseModel):
     query: str = ""
     tags: list[str] = Field(default_factory=list)
     limit: int = Field(default=20, ge=1, le=50)
+
+
+class LookupStrudelDocsArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=300)
+    topics: list[str] = Field(default_factory=list, max_length=8)
+    symbols: list[str] = Field(default_factory=list, max_length=12)
+    limit: int = Field(default=5, ge=1, le=8)
 
 
 class InspectSampleUsageArguments(BaseModel):
@@ -103,8 +113,14 @@ _QUESTION_OPTION_SCHEMA: dict[str, Any] = {
 class ToolRegistry:
     """Deterministic runtime tools. Their results remain internal to an Agent Run."""
 
-    def __init__(self, *, sample_registry_loader: Callable[[], LoadedSampleRegistry] = load_sample_registry) -> None:
+    def __init__(
+        self,
+        *,
+        sample_registry_loader: Callable[[], LoadedSampleRegistry] = load_sample_registry,
+        strudel_knowledge_loader: Callable[[], StrudelKnowledgeBase] = load_strudel_knowledge,
+    ) -> None:
         self._sample_registry_loader = sample_registry_loader
+        self._strudel_knowledge_loader = strudel_knowledge_loader
         self._definitions = {
             "inspect_diff": ToolDefinition(
                 name="inspect_diff",
@@ -127,6 +143,32 @@ class ToolRegistry:
                     "additionalProperties": False,
                     "properties": {"candidateCode": {"type": "string"}},
                     "required": ["candidateCode"],
+                },
+            ),
+            "lookup_strudel_docs": ToolDefinition(
+                name="lookup_strudel_docs",
+                description=(
+                    "Search the pinned offline Strudel manual and function reference. "
+                    "Use focused English terms and include exact API names in symbols when known."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "topics": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": 8,
+                        },
+                        "symbols": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": 12,
+                        },
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+                    },
+                    "required": ["query", "topics", "symbols", "limit"],
                 },
             ),
             "lookup_samples": ToolDefinition(
@@ -190,6 +232,7 @@ class ToolRegistry:
         self._handlers: dict[str, ToolHandler] = {
             "inspect_diff": self._inspect_diff,
             "validate_candidate": self._validate_candidate,
+            "lookup_strudel_docs": self._lookup_strudel_docs,
             "lookup_samples": self._lookup_samples,
             "inspect_sample_usage": self._inspect_sample_usage,
             "finalize_change": self._finalize_change,
@@ -306,6 +349,32 @@ class ToolRegistry:
                     for sound in matches[: arguments.limit]
                 ],
             },
+        )
+
+    def _lookup_strudel_docs(self, call: ToolCall) -> ToolResult:
+        arguments = LookupStrudelDocsArguments.model_validate(call.arguments)
+        try:
+            knowledge = self._strudel_knowledge_loader()
+        except StrudelDocsError:
+            return self._result(
+                call,
+                "recoverable_error",
+                {
+                    "error": {
+                        "code": "strudel_docs_unavailable",
+                        "message": "The pinned local Strudel manual could not be read.",
+                    }
+                },
+            )
+        return self._result(
+            call,
+            "ok",
+            knowledge.search(
+                arguments.query,
+                topics=arguments.topics,
+                symbols=arguments.symbols,
+                limit=arguments.limit,
+            ),
         )
 
     def _inspect_sample_usage(self, call: ToolCall) -> ToolResult:

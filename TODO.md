@@ -131,9 +131,11 @@ workflow.
 - [x] **P4G.2.1** Define an evaluation assessment contract and deterministic final/region checks
 - [x] **P4G.2.2** Execute a scenario through an Agent Run and capture terminal, loop, and tool observations
 - [x] **P4G.2.3** Add structured human musical review and aggregate evaluation reports
+- [x] **P4G.2.4** Add a version-matched offline Strudel skill, tutorial corpus, function reference, and Agent lookup tool
 - [ ] **P4G.3.1** Add an opt-in Provider baseline runner that accepts a one-time environment key and emits safe reports
 - [ ] **P4G.3.2** Run the selected Provider, complete human reviews, and tune instructions, tools, and budgets from measured results
-- [ ] **P4G.3.3** Compact repeated candidate and tool history when measured token growth justifies it
+- [ ] **P4G.3.3** Compare Provider outcomes with no domain context, the core skill, and skill plus manual lookup
+- [ ] **P4G.3.4** Compact repeated candidate and tool history when measured token growth justifies it
 
 ## Phase 5: Validation and Performance Hardening
 

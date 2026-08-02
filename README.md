@@ -44,6 +44,23 @@ Open:
 http://127.0.0.1:5173/
 ```
 
+## Strudel Knowledge
+
+The version-matched Strudel skill and manual are checked into the repository,
+so first-time setup and normal Agent Runs do not download documentation or
+require documentation network access.
+
+After upgrading the pinned Strudel packages, regenerate the offline knowledge
+package from the repository root:
+
+```bash
+python3 scripts/sync_strudel_knowledge.py
+```
+
+The sync command requires network access and Node.js. Review the generated
+manifest and corpus diff, then run the test suites before committing the
+updated knowledge package.
+
 ## Tests
 
 ```bash

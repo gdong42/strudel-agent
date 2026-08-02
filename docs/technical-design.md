@@ -250,6 +250,9 @@ Initial runtime tools:
   the agent's self-review.
 - `validate_candidate(candidate_code)`: run available non-performing syntax,
   mini-notation, sample, structural, and safety checks.
+- `lookup_strudel_docs(query, topics, symbols, limit)`: search the pinned local
+  Strudel tutorials and function reference. Exact API names and aliases receive
+  priority over broad text matches.
 - `finalize_change(code, explanation, action, warnings)`: request completion. The
   runtime applies deterministic finalization gates before accepting it.
 - `request_user_input(question, options, reason)`: pause only for material
@@ -265,6 +268,35 @@ domain-specific sequence such as "generate, then check drums, then regenerate."
 The model chooses its tool calls and revision strategy. Configurable turn,
 active-time, token, and cancellation budgets prevent runaway loops. Exhausting
 a budget ends the run as `failed`; no internal candidate is staged.
+
+#### Offline Strudel Knowledge
+
+Agent domain knowledge has two local, provider-neutral layers:
+
+- `backend/app/knowledge/strudel/skill.md` is short version-matched operating
+  guidance included in every system prompt.
+- `backend/app/knowledge/strudel/corpus.json` is queried on demand through
+  `lookup_strudel_docs`; the full manual is never copied into every model turn.
+
+The checked-in corpus combines the official `learn`, `workshop`, and `recipes`
+MDX from the pinned REPL source tag with the structured
+`@strudel/reference` package. The build expands embedded REPL examples and
+function-reference components into plain searchable text and code. Its
+manifest records upstream versions, commit, license, document counts, and a
+SHA-256 integrity value.
+
+`scripts/sync_strudel_knowledge.py` is an explicit maintenance command, not an
+application startup step. It may access the upstream sources while updating the
+repository; normal backend startup and every Agent Run remain fully offline
+with respect to documentation. The in-memory search index prioritizes exact
+symbols, aliases, headings, topics, and examples, bounds each result, and needs
+no embedding model or vector database at the current corpus size.
+
+Documentation lookup is internal self-review. The model decides when uncertain
+syntax or APIs warrant a query, uses the result to revise its candidate, and
+continues the existing validation/finalization loop. The browser may show a
+collapsed "Consulting the Strudel manual" activity, but never receives the
+query, excerpts, candidates, or tool result.
 
 ### 6.5 Agent Run Lifecycle
 

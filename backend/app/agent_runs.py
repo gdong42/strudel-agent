@@ -42,6 +42,7 @@ _PUBLIC_TOOL_NAMES = frozenset(
     {
         "inspect_diff",
         "validate_candidate",
+        "lookup_strudel_docs",
         "lookup_samples",
         "inspect_sample_usage",
         "finalize_change",

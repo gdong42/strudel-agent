@@ -93,6 +93,7 @@ export type AgentActivityStatus = 'running' | 'completed' | 'cancelled';
 export type AgentActivityTool =
   | 'inspect_diff'
   | 'validate_candidate'
+  | 'lookup_strudel_docs'
   | 'lookup_samples'
   | 'inspect_sample_usage'
   | 'finalize_change'

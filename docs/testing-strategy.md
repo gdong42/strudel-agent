@@ -89,8 +89,9 @@ results, not assert a model's private reasoning.
 | `backend/app/evaluations.py` | Scenario schema, fixture confinement, deterministic assessment, safe runner reports, fixed-rubric human review, and latest-per-scenario aggregation |
 | `backend/app/prompt_contract.py` | Shared Agent Runtime instructions |
 | `backend/app/project_context.py` | Optional context loading, project-root confinement, UTF-8, and size limits |
+| `backend/app/strudel_docs.py` | Checked-in corpus integrity, exact-symbol ranking, tutorial retrieval, result bounds, and offline failure handling |
 | `backend/app/samples.py` | Versioned manifest validation, path confinement, missing-registry behavior, and stable declared-sound ordering |
-| `backend/app/tools/` | Tool argument validation, deterministic results, declared-sample lookup/inspection, and recoverable/fatal errors |
+| `backend/app/tools/` | Tool argument validation, deterministic results, offline Strudel reference lookup, declared-sample lookup/inspection, and recoverable/fatal errors |
 | `backend/app/providers/` | Normalized model turns, tool calls, usage, and vendor error mapping |
 | `backend/app/tracks.py` | `read_track` / `write_track` round-trip, missing file behavior |
 | `backend/app/snapshots.py` | CRUD, list ordering, prune by count, prune by age |
@@ -129,6 +130,7 @@ results, not assert a model's private reasoning.
 | 10 | A Run or Change lifecycle event is persisted | Audit links IDs and safe outcome metadata while excluding raw input, code, credentials, provider payloads, and hidden reasoning |
 | 11 | A model turn streams commentary and calls tools | Public activity reports bounded commentary and fixed model/tool metadata while excluding candidate code, reasoning, tool arguments/results, and raw provider payloads |
 | 12 | OpenAI or DeepSeek returns streamed text, reasoning, and tool-call deltas | Only public content reaches the commentary callback; the complete normalized tool turn is reconstructed privately |
+| 13 | Model calls `lookup_strudel_docs` with an exact function symbol | The pinned local result and examples enter private tool history; only a fixed tool-activity label is public |
 
 ---
 

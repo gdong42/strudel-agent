@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.models import ToolCall
 from app.samples import DeclaredSample, LoadedSampleRegistry, SampleRegistry, SampleRegistryError
+from app.strudel_docs import StrudelDocsError
 from app.tools import ToolRegistry
 
 
@@ -24,13 +25,14 @@ def test_registry_exposes_strict_runtime_tool_schemas() -> None:
     assert [definition.name for definition in definitions] == [
         "inspect_diff",
         "validate_candidate",
+        "lookup_strudel_docs",
         "lookup_samples",
         "inspect_sample_usage",
         "finalize_change",
         "request_user_input",
     ]
     assert all(definition.input_schema["additionalProperties"] is False for definition in definitions)
-    assert definitions[4].input_schema["required"] == ["code", "explanation", "action", "warnings"]
+    assert definitions[5].input_schema["required"] == ["code", "explanation", "action", "warnings"]
 
 
 def test_inspect_diff_returns_deterministic_line_summary() -> None:
@@ -88,6 +90,42 @@ def test_lookup_samples_filters_a_declared_local_registry() -> None:
         "total": 2,
         "sounds": [{"name": "house_hat", "tags": ["drum", "hat", "house"], "description": None}],
     }
+
+
+def test_lookup_strudel_docs_returns_pinned_offline_reference_results() -> None:
+    result = ToolRegistry().execute(
+        ToolCall(
+            id="docs-1",
+            name="lookup_strudel_docs",
+            arguments={
+                "query": "combine patterns at the same time",
+                "topics": ["patterns"],
+                "symbols": ["stack"],
+                "limit": 2,
+            },
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output["manualVersion"] == "1.3.0"
+    assert result.output["results"][0]["id"] == "reference:stack"
+    assert "played at the same time" in result.output["results"][0]["content"]
+
+
+def test_lookup_strudel_docs_reports_a_recoverable_local_package_failure() -> None:
+    def unavailable_docs():
+        raise StrudelDocsError("bad corpus")
+
+    result = ToolRegistry(strudel_knowledge_loader=unavailable_docs).execute(
+        ToolCall(
+            id="docs-1",
+            name="lookup_strudel_docs",
+            arguments={"query": "scope", "topics": [], "symbols": [], "limit": 3},
+        )
+    )
+
+    assert result.status == "recoverable_error"
+    assert result.output["error"]["code"] == "strudel_docs_unavailable"
 
 
 def test_inspect_sample_usage_reports_only_new_undeclared_direct_sound_names() -> None:

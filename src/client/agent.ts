@@ -398,6 +398,7 @@ export class AgentPanel {
 const TOOL_ACTIVITY_LABELS: Record<AgentActivityTool, string> = {
   inspect_diff: 'Reviewing code changes',
   validate_candidate: 'Validating Strudel code',
+  lookup_strudel_docs: 'Consulting the Strudel manual',
   lookup_samples: 'Looking up declared samples',
   inspect_sample_usage: 'Checking sample usage',
   finalize_change: 'Finalizing change',

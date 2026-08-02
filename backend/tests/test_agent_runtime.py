@@ -483,6 +483,7 @@ async def test_execute_model_turn_runs_tools_in_provider_order_and_returns_inter
     assert [tool.name for tool in provider.requests[0].tools] == [
         "inspect_diff",
         "validate_candidate",
+        "lookup_strudel_docs",
         "lookup_samples",
         "inspect_sample_usage",
         "finalize_change",

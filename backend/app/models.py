@@ -109,6 +109,7 @@ AgentActivityStatus = Literal["running", "completed", "cancelled"]
 AgentActivityTool = Literal[
     "inspect_diff",
     "validate_candidate",
+    "lookup_strudel_docs",
     "lookup_samples",
     "inspect_sample_usage",
     "finalize_change",
