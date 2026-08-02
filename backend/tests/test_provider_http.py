@@ -96,8 +96,12 @@ async def test_stream_request_logs_response_and_completion(caplog: pytest.LogCap
 
 
 @pytest.mark.anyio
-async def test_debug_level_logs_stream_events(caplog: pytest.LogCaptureFixture) -> None:
-    body = f'data: {json.dumps({"type": "delta", "text": "debug stream response"})}\n\ndata: [DONE]\n\n'
+async def test_debug_level_aggregates_stream_events(caplog: pytest.LogCaptureFixture) -> None:
+    events = [
+        {"type": "delta", "text": "debug stream "},
+        {"type": "delta", "text": "response"},
+    ]
+    body = "\n\n".join(f"data: {json.dumps(event)}" for event in events) + "\n\ndata: [DONE]\n\n"
     transport = httpx.MockTransport(
         lambda request: httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
     )
@@ -109,8 +113,51 @@ async def test_debug_level_logs_stream_events(caplog: pytest.LogCaptureFixture) 
     )
 
     with caplog.at_level(logging.DEBUG, logger=PROVIDER_HTTP_LOGGER):
-        events = [event async for event in client.stream_sse_json("POST", "responses")]
+        received = [event async for event in client.stream_sse_json("POST", "responses")]
 
-    assert events == [{"type": "delta", "text": "debug stream response"}]
-    assert "Provider HTTP stream event" in caplog.text
-    assert 'payload={"type":"delta","text":"debug stream response"}' in caplog.text
+    assert received == events
+    stream_payload_logs = [
+        record.message
+        for record in caplog.records
+        if "Provider HTTP stream payload" in record.message
+    ]
+    assert len(stream_payload_logs) == 1
+    assert "events=2" in stream_payload_logs[0]
+    assert "truncated=false" in stream_payload_logs[0]
+    assert '{"type":"delta","text":"debug stream "}' in stream_payload_logs[0]
+    assert '{"type":"delta","text":"response"}' in stream_payload_logs[0]
+    assert "Provider HTTP stream event" not in caplog.text
+
+
+@pytest.mark.anyio
+async def test_debug_stream_aggregate_is_bounded_and_redacted(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.providers.http.DEBUG_STREAM_PAYLOAD_CHAR_LIMIT", 64)
+    event = {"api_key": "stream-secret", "text": "x" * 200}
+    body = f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n"
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+    )
+    client = ProviderHttpClient(
+        "Test Provider",
+        "test-key",
+        "https://provider.example/v1/",
+        transport=transport,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=PROVIDER_HTTP_LOGGER):
+        received = [item async for item in client.stream_sse_json("POST", "responses")]
+
+    assert received == [event]
+    stream_payload_logs = [
+        record.message
+        for record in caplog.records
+        if "Provider HTTP stream payload" in record.message
+    ]
+    assert len(stream_payload_logs) == 1
+    assert "captured_chars=64" in stream_payload_logs[0]
+    assert "truncated=true" in stream_payload_logs[0]
+    assert "stream-secret" not in caplog.text
+    assert "[REDACTED]" in stream_payload_logs[0]

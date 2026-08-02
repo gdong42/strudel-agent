@@ -5,6 +5,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -14,6 +15,7 @@ from .base import ProviderError
 
 REQUEST_TIMEOUT_SECONDS = 45.0
 DEBUG_PAYLOAD_CHAR_LIMIT = 100_000
+DEBUG_STREAM_PAYLOAD_CHAR_LIMIT = 16_000
 _SENSITIVE_PAYLOAD_KEYS = frozenset(
     {
         "apikey",
@@ -30,6 +32,31 @@ _DEBUG_CREDENTIAL_PATTERN = re.compile(
 _DEBUG_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^,\s;]+")
 _DEBUG_API_KEY_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
 logger = logging.getLogger("uvicorn.error.strudel_agent.provider_http")
+
+
+@dataclass
+class _DebugStreamCapture:
+    fragments: list[str] = field(default_factory=list)
+    total_chars: int = 0
+    captured_chars: int = 0
+    truncated: bool = False
+
+    def add(self, serialized: str) -> None:
+        separator_chars = 1 if self.total_chars > 0 else 0
+        self.total_chars += separator_chars + len(serialized)
+        remaining = DEBUG_STREAM_PAYLOAD_CHAR_LIMIT - self.captured_chars
+        if remaining <= separator_chars:
+            self.truncated = True
+            return
+        fragment = serialized[: remaining - separator_chars]
+        self.fragments.append(fragment)
+        self.captured_chars += separator_chars + len(fragment)
+        if len(fragment) < len(serialized):
+            self.truncated = True
+
+    def payload(self) -> str:
+        suffix = ",...[truncated]" if self.truncated else ""
+        return f"[{','.join(self.fragments)}{suffix}]"
 
 
 class ProviderHttpClient:
@@ -102,6 +129,7 @@ class ProviderHttpClient:
         response_status: int | None = None
         event_count = 0
         completed = False
+        debug_capture = _DebugStreamCapture() if logger.isEnabledFor(logging.DEBUG) else None
         logger.info(
             "Provider HTTP request started provider=%s method=%s path=%s stream=true",
             self.provider_label,
@@ -150,13 +178,8 @@ class ProviderHttpClient:
                         if not isinstance(event, dict):
                             raise ProviderError(f"{self.provider_label} returned an invalid stream")
                         event_count += 1
-                        self._log_debug_payload(
-                            "Provider HTTP stream event",
-                            method,
-                            log_path,
-                            event,
-                            event_number=event_count,
-                        )
+                        if debug_capture is not None:
+                            debug_capture.add(self._serialize_debug_payload(event))
                         yield event
         except ProviderError:
             raise
@@ -167,6 +190,20 @@ class ProviderHttpClient:
             self._log_transport_failure(method, log_path, started_at, type(error).__name__, stream=True)
             raise ProviderError(f"{self.provider_label} is unavailable", retryable=True) from error
         finally:
+            if debug_capture is not None:
+                logger.debug(
+                    "Provider HTTP stream payload provider=%s method=%s path=%s completed=%s "
+                    "events=%s chars=%s captured_chars=%s truncated=%s payload=%s",
+                    self.provider_label,
+                    method,
+                    log_path,
+                    str(completed).lower(),
+                    event_count,
+                    debug_capture.total_chars,
+                    debug_capture.captured_chars,
+                    str(debug_capture.truncated).lower(),
+                    debug_capture.payload(),
+                )
             if response_status is not None and response_status < 400:
                 logger.info(
                     "Provider HTTP stream closed provider=%s method=%s path=%s status=%s completed=%s events=%s duration_ms=%s",
@@ -217,32 +254,31 @@ class ProviderHttpClient:
         method: str,
         path: str,
         payload: object,
-        *,
-        event_number: int | None = None,
     ) -> None:
         if not logger.isEnabledFor(logging.DEBUG):
             return
-        serialized = json.dumps(
-            self._redact_debug_value(payload),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=str,
-        )
+        serialized = self._serialize_debug_payload(payload)
         original_length = len(serialized)
         truncated = original_length > DEBUG_PAYLOAD_CHAR_LIMIT
         if truncated:
             serialized = f"{serialized[:DEBUG_PAYLOAD_CHAR_LIMIT]}...[truncated]"
-        event_field = f" event={event_number}" if event_number is not None else ""
         logger.debug(
-            "%s provider=%s method=%s path=%s%s chars=%s truncated=%s payload=%s",
+            "%s provider=%s method=%s path=%s chars=%s truncated=%s payload=%s",
             event,
             self.provider_label,
             method,
             path,
-            event_field,
             original_length,
             str(truncated).lower(),
             serialized,
+        )
+
+    def _serialize_debug_payload(self, payload: object) -> str:
+        return json.dumps(
+            self._redact_debug_value(payload),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
         )
 
     @classmethod

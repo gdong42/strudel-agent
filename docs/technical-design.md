@@ -412,12 +412,14 @@ its start and completion, while the HTTP adapter records outbound request start,
 response status, stream completion, event count, and elapsed time. HTTP logs
 retain only the provider label, method, and query-free endpoint path.
 
-Provider request payloads, response bodies, and individual streaming events are
-available only at Uvicorn's `DEBUG` log level. Debug payloads are serialized onto
-bounded single-line entries and redact authorization fields and recognizable
-API-key forms. They can still contain prompts, editor code, tool arguments, and
-model output, so debug logging is an explicit local-development mode rather than
-the default or a persistent audit source.
+Provider request payloads, response bodies, and a bounded aggregate of streaming
+events are available only at Uvicorn's `DEBUG` log level. A stream emits one
+aggregate payload entry when it closes rather than one entry per token event;
+the entry records event and character counts and whether its 16 KiB capture was
+truncated. Debug payloads redact authorization fields and recognizable API-key
+forms. They can still contain prompts, editor code, tool arguments, and model
+output, so debug logging is an explicit local-development mode rather than the
+default or a persistent audit source.
 
 `GET /events` retains the existing `track` event and adds an `agent-run` event.
 Each `agent-run` payload is exactly an `AgentRunPublic` projection. The Run
