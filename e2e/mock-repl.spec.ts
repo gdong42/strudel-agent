@@ -240,6 +240,26 @@ test('manual agent change stages diff without evaluating and can be undone', asy
   await expect(page.getByTestId('mock-editor')).toHaveValue(before);
 });
 
+test('agent can create the first track from an empty editor', async ({ page }) => {
+  const runRequests: Array<{ editorVersion: { code: string; hash: string } }> = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/agent/runs')) {
+      runRequests.push(request.postDataJSON() as { editorVersion: { code: string; hash: string } });
+    }
+  });
+
+  await page.goto('/');
+  await page.getByTestId('mock-editor').fill('');
+  await page.locator('#agent-intent').fill('start a minimal house beat');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.locator('#status')).toContainText('staged. Review it');
+  await expect(page.getByTestId('mock-editor')).toHaveValue(/s\("bd\*4"\)/);
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0].editorVersion).toMatchObject({ code: '', hash: expect.any(String) });
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
+});
+
 test('Auto Fire evaluates only after the final Run stage is acknowledged', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#auto-fire')).toBeEnabled();

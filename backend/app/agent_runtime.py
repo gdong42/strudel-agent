@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import re
 import time
 from typing import Any
 from uuid import uuid4
@@ -30,6 +32,14 @@ from .tools import ToolRegistry
 
 _TERMINAL_TOOL_NAMES = frozenset({"finalize_change", "request_user_input"})
 _CANCELLED_MODEL_TURN = object()
+_LOG_DETAIL_LIMIT = 500
+_CREDENTIAL_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)\b(api[-_ ]?key|authorization|access[-_ ]?token|refresh[-_ ]?token|secret)"
+    r"([\"']?\s*[:=]\s*[\"']?)(?:bearer\s+)?([^,\s;\"']+)"
+)
+_BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[^,\s;]+")
+_API_KEY_TOKEN_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
+logger = logging.getLogger("uvicorn.error.strudel_agent.runtime")
 
 
 class AgentRuntimeTransitionError(RuntimeError):
@@ -51,6 +61,19 @@ class AgentRunCancellation:
 
     async def wait(self) -> None:
         await self._event.wait()
+
+
+def _safe_log_detail(error: BaseException) -> str:
+    detail = " ".join(str(error).split()) or type(error).__name__
+    detail = _CREDENTIAL_ASSIGNMENT_PATTERN.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        detail,
+    )
+    detail = _BEARER_TOKEN_PATTERN.sub("Bearer [REDACTED]", detail)
+    detail = _API_KEY_TOKEN_PATTERN.sub("[REDACTED]", detail)
+    if len(detail) > _LOG_DETAIL_LIMIT:
+        return f"{detail[:_LOG_DETAIL_LIMIT]}..."
+    return detail
 
 
 def build_run_budget(config: AgentRuntimeConfig) -> AgentRunBudget:
@@ -220,8 +243,8 @@ def update_agent_run_editor_version(
 ) -> AgentRun:
     if run.status not in {"running", "needs_input"}:
         raise AgentRuntimeTransitionError("Only active Agent Runs may receive editor updates")
-    if not base_hash.strip() or not editor_version.code.strip():
-        raise AgentRuntimeTransitionError("Agent Run editor updates require non-empty code and hashes")
+    if not base_hash.strip():
+        raise AgentRuntimeTransitionError("Agent Run editor updates require a non-empty base hash")
     if run.editor_version.hash != base_hash:
         raise AgentRuntimeTransitionError("Agent Run editor update is stale")
     if editor_version.hash == run.editor_version.hash:
@@ -262,8 +285,8 @@ def reopen_completed_agent_run(
         raise AgentRuntimeTransitionError("Only completed Agent Runs may be reopened after a stale final")
     if run.staged_change_id:
         raise AgentRuntimeTransitionError("A persisted Agent Run change cannot be reopened")
-    if not base_hash.strip() or not editor_version.code.strip():
-        raise AgentRuntimeTransitionError("Agent Run editor updates require non-empty code and hashes")
+    if not base_hash.strip():
+        raise AgentRuntimeTransitionError("Agent Run editor updates require a non-empty base hash")
     if run.editor_version.hash != base_hash:
         raise AgentRuntimeTransitionError("Agent Run editor update is stale")
     if editor_version.hash == run.editor_version.hash:
@@ -329,11 +352,29 @@ async def execute_model_turn(
         model=run.model,
         maxOutputTokens=max_output_tokens,
     )
+    turn_number = run.usage.turns + 1
+    request_started_at = time.monotonic()
+    logger.info(
+        "Agent provider turn started run_id=%s provider=%s model=%s turn=%s max_output_tokens=%s",
+        run.id,
+        run.provider,
+        run.model,
+        turn_number,
+        max_output_tokens,
+    )
     try:
         remaining_active_seconds = _remaining_active_seconds(run, started_at)
         async with asyncio.timeout(remaining_active_seconds):
             result = await _await_provider_turn(provider, request, cancellation, on_commentary)
     except TimeoutError:
+        logger.warning(
+            "Agent provider turn timed out run_id=%s provider=%s model=%s turn=%s duration_ms=%s",
+            run.id,
+            run.provider,
+            run.model,
+            turn_number,
+            _elapsed_milliseconds(request_started_at),
+        )
         return _fail_run(
             run,
             code="budget_exhausted",
@@ -344,6 +385,16 @@ async def execute_model_turn(
     except ProviderError as error:
         if cancellation and cancellation.is_cancelled:
             return cancel_agent_run(run, now=_timestamp(now))
+        logger.warning(
+            "Agent provider turn failed run_id=%s provider=%s model=%s turn=%s retryable=%s duration_ms=%s detail=%s",
+            run.id,
+            run.provider,
+            run.model,
+            turn_number,
+            error.retryable,
+            _elapsed_milliseconds(request_started_at),
+            _safe_log_detail(error),
+        )
         return _fail_run(
             run,
             code="provider_error",
@@ -351,9 +402,19 @@ async def execute_model_turn(
             retryable=error.retryable,
             now=_timestamp(now),
         )
-    except Exception:
+    except Exception as error:
         if cancellation and cancellation.is_cancelled:
             return cancel_agent_run(run, now=_timestamp(now))
+        logger.error(
+            "Unexpected agent provider turn failure run_id=%s provider=%s model=%s turn=%s exception=%s duration_ms=%s detail=%s",
+            run.id,
+            run.provider,
+            run.model,
+            turn_number,
+            type(error).__name__,
+            _elapsed_milliseconds(request_started_at),
+            _safe_log_detail(error),
+        )
         return _fail_run(
             run,
             code="internal_error",
@@ -366,6 +427,13 @@ async def execute_model_turn(
     if result is _CANCELLED_MODEL_TURN or (cancellation and cancellation.is_cancelled):
         return cancel_agent_run(run, now=completed_at)
     if not isinstance(result, ModelTurnResult):
+        logger.error(
+            "Agent provider returned a malformed result run_id=%s provider=%s model=%s result_type=%s",
+            run.id,
+            run.provider,
+            run.model,
+            type(result).__name__,
+        )
         return _fail_run(
             run,
             code="provider_error",
@@ -373,6 +441,17 @@ async def execute_model_turn(
             retryable=False,
             now=completed_at,
         )
+    logger.info(
+        "Agent provider turn completed run_id=%s provider=%s model=%s turn=%s provider_request_id=%s input_tokens=%s output_tokens=%s duration_ms=%s",
+        run.id,
+        run.provider,
+        run.model,
+        turn_number,
+        result.provider_request_id or "none",
+        result.usage.input_tokens,
+        result.usage.output_tokens,
+        _elapsed_milliseconds(request_started_at),
+    )
     updated = append_model_turn(run, result, now=completed_at)
     if failed_run := _budget_failure_after_turn(updated, now=completed_at):
         return failed_run
@@ -599,6 +678,10 @@ def _require_running(run: AgentRun) -> None:
 
 def _timestamp(now: int | None) -> int:
     return int(time.time() * 1000) if now is None else now
+
+
+def _elapsed_milliseconds(started_at: float) -> int:
+    return max(0, round((time.monotonic() - started_at) * 1000))
 
 
 def _active_elapsed_milliseconds(run: AgentRun, timestamp: int) -> int:

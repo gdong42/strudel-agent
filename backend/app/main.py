@@ -188,8 +188,6 @@ async def start_agent_run(
 ) -> AgentRunPublic:
     if not payload.intent.strip():
         raise HTTPException(status_code=400, detail="Agent Run intent cannot be empty")
-    if not payload.editor_version.code.strip():
-        raise HTTPException(status_code=400, detail="Agent Run editor code cannot be empty")
 
     try:
         config = load_config()
@@ -273,8 +271,8 @@ async def update_agent_run_editor(
     x_agent_model: str | None = Header(default=None),
     x_agent_api_key: str | None = Header(default=None),
 ) -> AgentRunPublic:
-    if not payload.base_hash.strip() or not payload.editor_version.code.strip():
-        raise HTTPException(status_code=400, detail="Agent Run editor updates require non-empty code and hashes")
+    if not payload.base_hash.strip():
+        raise HTTPException(status_code=400, detail="Agent Run editor updates require a non-empty base hash")
     existing_run = await agent_runs.get(run_id)
     if not existing_run:
         raise HTTPException(status_code=404, detail="Agent Run not found")

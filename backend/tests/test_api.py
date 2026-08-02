@@ -677,20 +677,32 @@ def test_cancel_agent_run_is_idempotent(project_paths: dict[str, Path], monkeypa
     assert rejected_input.status_code == 409
 
 
-def test_start_agent_run_rejects_empty_editor_code(project_paths: dict[str, Path]) -> None:
-    client = TestClient(app)
+def test_start_agent_run_accepts_empty_editor_code(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(main, "agent_runs", AgentRunManager())
+    empty_hash = hashlib.sha256(b"").hexdigest()
 
-    response = client.post(
-        "/agent/runs",
-        json={
-            "intent": "Make the drums more energetic.",
-            "editorVersion": {"code": " ", "hash": "editor-hash"},
-            "applyMode": "manual",
-        },
-    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Start a minimal house beat.",
+                "editorVersion": {"code": "", "hash": empty_hash},
+                "applyMode": "manual",
+            },
+        )
+        assert response.status_code == 202
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Agent Run editor code cannot be empty"
+        current = response.json()
+        for _ in range(100):
+            current = client.get(f'/agent/runs/{response.json()["id"]}').json()
+            if current["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+    assert current["status"] == "completed"
+    assert current["finalChange"]["code"].startswith('s("bd*4")')
 
 
 def test_get_missing_agent_run_returns_404(project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:

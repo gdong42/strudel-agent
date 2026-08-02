@@ -27,6 +27,9 @@ cd backend
 UV_CACHE_DIR=../.uv-cache uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
 ```
 
+For local Provider payload diagnostics, add `--log-level debug`. Debug logs
+include model prompts and responses, so enable them only in a trusted terminal.
+
 Start the frontend in another terminal:
 
 ```bash

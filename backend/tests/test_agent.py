@@ -38,6 +38,32 @@ async def test_mock_provider_implements_model_turn_contract() -> None:
 
 
 @pytest.mark.anyio
+async def test_mock_provider_creates_starter_code_for_an_empty_project() -> None:
+    result = await MockProvider().next_turn(
+        ModelTurnRequest(
+            messages=[
+                AgentMessage(
+                    role="user",
+                    content=json.dumps(
+                        {
+                            "intent": "Start a minimal house beat.",
+                            "editorVersion": {"code": "", "hash": "empty-hash"},
+                        }
+                    ),
+                )
+            ],
+            tools=[],
+            model="mock",
+            maxOutputTokens=100,
+        )
+    )
+
+    assert result.assistant_message.tool_calls[0].arguments["code"] == (
+        's("bd*4")\n\n// Agent draft: Start a minimal house beat.\n'
+    )
+
+
+@pytest.mark.anyio
 async def test_mock_provider_uses_the_latest_runtime_editor_version() -> None:
     result = await MockProvider().next_turn(
         ModelTurnRequest(

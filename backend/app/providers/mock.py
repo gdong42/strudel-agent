@@ -13,7 +13,8 @@ class MockProvider:
         intent, code = self._runtime_input(request)
         marker = f"// Agent draft: {intent}"
         action = "noop" if marker in code else "apply"
-        final_code = code if action == "noop" else f"{code.rstrip()}\n\n{marker}\n"
+        base_code = code.rstrip() or 's("bd*4")'
+        final_code = code if action == "noop" else f"{base_code}\n\n{marker}\n"
         return ModelTurnResult(
             assistantMessage=AgentMessage(
                 role="assistant",

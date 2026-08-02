@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import pytest
 
@@ -14,6 +15,7 @@ from app.agent_runtime import (
     cancel_agent_run,
     create_agent_run,
     execute_model_turn,
+    reopen_completed_agent_run,
     resume_agent_run,
     update_agent_run_editor_version,
 )
@@ -32,6 +34,9 @@ from app.models import (
 from app.providers.base import ProviderError
 from app.tools import ToolRegistry
 from tests.fakes import ScriptedAgentProvider
+
+
+RUNTIME_LOGGER = "uvicorn.error.strudel_agent.runtime"
 
 
 def make_run() -> AgentRun:
@@ -96,6 +101,25 @@ def test_create_agent_run_initializes_private_context_and_budget() -> None:
     assert json.loads(run.messages[1].content) == {
         "intent": "make the drums more energetic",
         "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+    }
+
+
+def test_create_agent_run_accepts_an_empty_editor_as_a_blank_project() -> None:
+    run = create_agent_run(
+        intent="Start a minimal house beat.",
+        editor_version=EditorVersion(code="", hash="empty-hash"),
+        apply_mode="manual",
+        budget=build_run_budget(AgentRuntimeConfig()),
+        provider="mock",
+        model="mock-model",
+        now=100,
+        run_id="blank-run",
+    )
+
+    assert run.editor_version.code == ""
+    assert json.loads(run.messages[1].content)["editorVersion"] == {
+        "code": "",
+        "hash": "empty-hash",
     }
 
 
@@ -263,6 +287,18 @@ def test_editor_update_requires_the_latest_hash_and_appends_private_context() ->
         }
     }
 
+    cleared = update_agent_run_editor_version(
+        run,
+        base_hash="editor-hash",
+        editor_version=EditorVersion(code="", hash="empty-hash"),
+        now=110,
+    )
+    assert cleared.editor_version.code == ""
+    assert json.loads(cleared.messages[-1].content)["editorUpdate"]["editorVersion"] == {
+        "code": "",
+        "hash": "empty-hash",
+    }
+
     with pytest.raises(AgentRuntimeTransitionError, match="stale"):
         update_agent_run_editor_version(
             updated,
@@ -278,6 +314,34 @@ def test_editor_update_requires_the_latest_hash_and_appends_private_context() ->
             editor_version=EditorVersion(code='s("hh")', hash="editor-hash"),
             now=120,
         )
+
+
+def test_completed_agent_run_can_reopen_against_an_empty_editor() -> None:
+    run = make_run()
+    payload = run.model_dump(by_alias=True)
+    payload.update(
+        {
+            "status": "completed",
+            "finalChange": {
+                "code": 's("bd*4")',
+                "explanation": "Added a kick.",
+                "action": "apply",
+                "warnings": [],
+            },
+        }
+    )
+    completed = AgentRun.model_validate(payload)
+
+    reopened = reopen_completed_agent_run(
+        completed,
+        base_hash="editor-hash",
+        editor_version=EditorVersion(code="", hash="empty-hash"),
+        now=110,
+    )
+
+    assert reopened.status == "running"
+    assert reopened.editor_version.code == ""
+    assert reopened.final_change is None
 
 
 @pytest.mark.anyio
@@ -437,6 +501,33 @@ async def test_execute_model_turn_runs_tools_in_provider_order_and_returns_inter
 
 
 @pytest.mark.anyio
+async def test_execute_model_turn_logs_safe_provider_lifecycle(caplog: pytest.LogCaptureFixture) -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(role="assistant", content="private model output"),
+                usage={"inputTokens": 12, "outputTokens": 3},
+                providerRequestId="provider-request-1",
+            )
+        ]
+    )
+
+    with caplog.at_level(logging.INFO, logger=RUNTIME_LOGGER):
+        await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+
+    assert (
+        "Agent provider turn started run_id=run-1 provider=mock model=mock-model turn=1 "
+        "max_output_tokens=400"
+    ) in caplog.text
+    assert (
+        "Agent provider turn completed run_id=run-1 provider=mock model=mock-model turn=1 "
+        "provider_request_id=provider-request-1 input_tokens=12 output_tokens=3"
+    ) in caplog.text
+    assert "private model output" not in caplog.text
+    assert 's("bd")' not in caplog.text
+
+
+@pytest.mark.anyio
 async def test_execute_model_turn_allows_unlimited_cumulative_tokens_with_a_per_turn_cap() -> None:
     budget = build_run_budget(
         AgentRuntimeConfig(
@@ -497,10 +588,11 @@ async def test_execute_model_turn_returns_unknown_tool_as_a_private_fatal_result
 
 
 @pytest.mark.anyio
-async def test_execute_model_turn_sanitizes_provider_failures() -> None:
+async def test_execute_model_turn_sanitizes_provider_failures(caplog: pytest.LogCaptureFixture) -> None:
     provider = ScriptedAgentProvider([ProviderError("provider unavailable: api-key=secret", retryable=True)])
 
-    failed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+    with caplog.at_level(logging.WARNING, logger=RUNTIME_LOGGER):
+        failed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
 
     assert failed.status == "failed"
     assert failed.failure is not None
@@ -508,13 +600,19 @@ async def test_execute_model_turn_sanitizes_provider_failures() -> None:
     assert failed.failure.message == "The model provider could not complete this run."
     assert failed.failure.retryable is True
     assert "secret" not in json.dumps(failed.to_public().model_dump(by_alias=True))
+    assert "run_id=run-1 provider=mock model=mock-model turn=1 retryable=True" in caplog.text
+    assert "provider unavailable: api-key=[REDACTED]" in caplog.text
+    assert "secret" not in caplog.text
 
 
 @pytest.mark.anyio
-async def test_execute_model_turn_sanitizes_unexpected_provider_failures() -> None:
+async def test_execute_model_turn_sanitizes_unexpected_provider_failures(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     provider = ScriptedAgentProvider([RuntimeError("private provider detail")])
 
-    failed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
+    with caplog.at_level(logging.ERROR, logger=RUNTIME_LOGGER):
+        failed = await execute_model_turn(make_run(), provider, ToolRegistry(), now=110)
 
     assert failed.status == "failed"
     assert failed.failure is not None
@@ -522,21 +620,27 @@ async def test_execute_model_turn_sanitizes_unexpected_provider_failures() -> No
     assert failed.failure.message == "The agent run could not complete."
     assert failed.failure.retryable is False
     assert "private provider detail" not in json.dumps(failed.to_public().model_dump(by_alias=True))
+    assert "exception=RuntimeError duration_ms=" in caplog.text
+    assert "detail=private provider detail" in caplog.text
 
 
 @pytest.mark.anyio
-async def test_execute_model_turn_sanitizes_malformed_provider_results() -> None:
+async def test_execute_model_turn_sanitizes_malformed_provider_results(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class MalformedResultProvider:
         async def next_turn(self, request: ModelTurnRequest) -> object:
             return {"unexpected": "private provider detail"}
 
-    failed = await execute_model_turn(make_run(), MalformedResultProvider(), ToolRegistry(), now=110)
+    with caplog.at_level(logging.ERROR, logger=RUNTIME_LOGGER):
+        failed = await execute_model_turn(make_run(), MalformedResultProvider(), ToolRegistry(), now=110)
 
     assert failed.status == "failed"
     assert failed.failure is not None
     assert failed.failure.code == "provider_error"
     assert failed.failure.retryable is False
     assert "private provider detail" not in json.dumps(failed.to_public().model_dump(by_alias=True))
+    assert "run_id=run-1 provider=mock model=mock-model result_type=dict" in caplog.text
 
 
 @pytest.mark.anyio

@@ -95,7 +95,7 @@ The adapter wraps `strudel-editor.repl.editor` (CodeMirror instance). All DOM ac
 projectId        — local workspace identifier
 sessionId        — current browser/backend runtime session identifier
 activeCode       — last successfully evaluated code (currently performing)
-editorCode       — code visible in the REPL editor
+editorCode       — code visible in the REPL editor; may be empty for a new project
 lastGoodCode     — most recent known safe fallback
 preAgentCode     — editor contents immediately before latest agent stage
 changeSet        — metadata for latest agent-staged change
@@ -401,6 +401,23 @@ code, tool outputs, raw provider requests/responses, and hidden reasoning. They
 are not automatically replayed into the model after a server restart. Accepted
 change records remain separate because recovery requires their approved code;
 the audit log never copies that content.
+
+Operational server logs are separate from the persistent audit log. Provider
+turn failures write safe correlation fields (`run_id`, provider, model, and
+retryability) plus a bounded diagnostic message to the backend terminal while
+the browser continues to receive a sanitized failure. These entries exclude
+prompts, editor code, request/response bodies, and credentials; common API key
+and bearer-token forms are redacted before logging. Each model turn also records
+its start and completion, while the HTTP adapter records outbound request start,
+response status, stream completion, event count, and elapsed time. HTTP logs
+retain only the provider label, method, and query-free endpoint path.
+
+Provider request payloads, response bodies, and individual streaming events are
+available only at Uvicorn's `DEBUG` log level. Debug payloads are serialized onto
+bounded single-line entries and redact authorization fields and recognizable
+API-key forms. They can still contain prompts, editor code, tool arguments, and
+model output, so debug logging is an explicit local-development mode rather than
+the default or a persistent audit source.
 
 `GET /events` retains the existing `track` event and adds an `agent-run` event.
 Each `agent-run` payload is exactly an `AgentRunPublic` projection. The Run
