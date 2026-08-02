@@ -8,8 +8,8 @@ from .base import ModelCommentaryCallback, ProviderError
 
 class MockProvider:
     async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
-        if request.remaining_token_budget == 0:
-            raise ProviderError("Mock model turn has no remaining token budget")
+        if request.max_output_tokens == 0:
+            raise ProviderError("Mock model turn has no output token budget")
         intent, code = self._runtime_input(request)
         marker = f"// Agent draft: {intent}"
         action = "noop" if marker in code else "apply"

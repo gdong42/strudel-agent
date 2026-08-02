@@ -130,7 +130,7 @@ runId             — identifier for one user intent and its internal work
 runStatus         — running | needs_input | completed | failed | cancelled
 baseCode/hash     — editor version the run currently reasons against
 turns             — normalized model messages and tool results needed to continue
-budgets           — turn, elapsed-time, token, and cancellation limits
+budgets           — turn, active-time, token, and cancellation limits
 activities        — bounded, browser-safe progress metadata
 finalChange       — present only after successful finalization
 pendingQuestion   — present only while needs_input
@@ -194,7 +194,7 @@ class ModelTurnRequest:
     messages: list[AgentMessage]
     tools: list[ToolDefinition]
     model: str
-    remaining_token_budget: int
+    max_output_tokens: int
 
 class AgentProvider(Protocol):
     async def next_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
@@ -229,7 +229,7 @@ compatibility constraint.
 Current providers remain direct API integrations:
 
 - OpenAI uses the Responses API and `gpt-5.6-terra` by default.
-- DeepSeek uses Chat Completions and `deepseek-v4-pro` as the checked-in
+- DeepSeek uses Chat Completions and `deepseek-v4-flash` as the checked-in
   project default.
 - Mock remains deterministic for runtime and UI tests.
 
@@ -263,7 +263,7 @@ that intermediate result and ask the user to adjudicate the agent's own error.
 The runtime controls budgets and safety boundaries, but it does not hardcode a
 domain-specific sequence such as "generate, then check drums, then regenerate."
 The model chooses its tool calls and revision strategy. Configurable turn,
-elapsed-time, token, and cancellation budgets prevent runaway loops. Exhausting
+active-time, token, and cancellation budgets prevent runaway loops. Exhausting
 a budget ends the run as `failed`; no internal candidate is staged.
 
 ### 6.5 Agent Run Lifecycle
@@ -506,7 +506,7 @@ editing.
 GET  /events                     SSE stream (`track` and public `agent-run` updates)
 POST /track                      Save editor code to disk (from evaluate)
 GET  /state                      Current local project/session runtime state
-GET  /agent/settings             Provider defaults and installed provider capabilities
+GET  /agent/settings             Provider/model/runtime defaults and installed provider capabilities
 POST /agent/providers/test       Test transient browser-supplied provider settings
 POST /agent/runs                 Start an Agent Run
 GET  /agent/runs/:id             Read public run status
@@ -598,12 +598,13 @@ GET  /samples                    List declared project samples (not live load st
   },
   "agent": {
     "provider": "deepseek",
-    "model": "deepseek-v4-pro",
+    "model": "deepseek-v4-flash",
     "contextFile": "agent-context.md",
     "runtime": {
       "maxTurns": 8,
-      "maxElapsedSeconds": 90,
-      "maxTotalTokens": 50000
+      "maxElapsedSeconds": 900,
+      "maxTotalTokens": 4000000,
+      "maxOutputTokensPerTurn": 65536
     }
   },
   "samples": {
@@ -616,17 +617,18 @@ GET  /samples                    List declared project samples (not live load st
 }
 ```
 
-The config file supplies backend defaults. The settings UI can override provider
-and model in the current browser. API keys are stored only in browser storage and
-sent to the backend for the duration of an individual request; the backend must
-not persist or return them. A hosted deployment may use platform credentials when
-the browser does not supply a user key.
+The config file supplies backend defaults. The settings UI can override provider,
+model, and runtime limits in the current browser. Runtime overrides are stored as
+separate profiles keyed by effective provider and model. API keys are stored only
+in browser storage and sent to the backend for the duration of an individual
+request; the backend must not persist or return them. A hosted deployment may use
+platform credentials when the browser does not supply a user key.
 
 `agent.contextFile` is only a project-relative file locator. Musical conventions
 live in that Markdown file, while `project.config.json` retains machine and
 runtime defaults such as provider, model, budgets, sample registry, and server
 binding. Browser-local settings remain the source for a user's API key and
-temporary provider/model override.
+temporary provider/model/runtime override.
 
 `samples.registryPath` names a project-relative directory containing optional
 `registry.json`. The registry contains declared Strudel sound names, tags, and
@@ -649,6 +651,35 @@ Runtime limits are operational guardrails, not a hardcoded task plan. The agent
 still chooses which tools to call and when to revise; the limits only prevent
 unbounded cost and latency. Values are initial defaults and should be tuned with
 evaluation data.
+
+`maxElapsedSeconds` measures cumulative active Run time across model and tool
+turns. It pauses while a Run is in `needs_input`, resumes with the same remaining
+budget after the user answers, and is enforced as an active deadline as well as
+at turn boundaries. Provider HTTP calls separately use a 45-second network
+operation timeout; for a stream, that read limit is the maximum wait for the next
+chunk, not a cap on the stream's total duration.
+
+`maxTotalTokens` is the cumulative provider-reported input plus output usage for
+the whole Run. Replayed message and tool history therefore counts again on each
+stateless model turn, matching API consumption. Set it to `null`, or choose
+Unlimited in browser settings, to disable only this cumulative limit.
+`maxOutputTokensPerTurn` remains a separate cap on every response. With a finite
+total budget, the runtime checks usage at turn boundaries because final input
+usage is known only after the provider responds; one turn may slightly cross it
+before the Run stops. Audit usage records input and output subtotals so later
+evaluation can distinguish context growth from model output.
+
+When the browser starts a Run, it resolves the selected provider/model profile
+against backend defaults and sends that complete runtime-limit snapshot in
+`runtimeLimits`. The backend validates and stores the snapshot on the new Run;
+later settings changes and clarification resumes do not alter it. If settings
+discovery is unavailable, omitting the field resolves the same snapshot from
+`project.config.json` on the backend.
+
+These browser-configurable limits are local/BYOK operating preferences, not a
+security or billing boundary. A future hosted service must enforce account,
+plan, and platform-key quotas independently on the server, regardless of the
+browser profile or an Unlimited selection.
 
 ## 11. agent-context.md Format
 

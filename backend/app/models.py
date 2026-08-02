@@ -248,7 +248,7 @@ class ModelTurnRequest(BaseModel):
     messages: list[AgentMessage]
     tools: list[ToolDefinition]
     model: str = Field(min_length=1)
-    remaining_token_budget: int = Field(alias="remainingTokenBudget", ge=0)
+    max_output_tokens: int = Field(alias="maxOutputTokens", ge=0)
 
 
 class ModelTurnResult(BaseModel):
@@ -270,7 +270,8 @@ class AgentRunBudget(BaseModel):
 
     max_turns: int = Field(alias="maxTurns", ge=1)
     max_elapsed_seconds: int = Field(alias="maxElapsedSeconds", ge=1)
-    max_total_tokens: int = Field(alias="maxTotalTokens", ge=1)
+    max_total_tokens: int | None = Field(alias="maxTotalTokens", ge=1)
+    max_output_tokens_per_turn: int = Field(default=65_536, alias="maxOutputTokensPerTurn", ge=1)
 
 
 class AgentRunUsage(BaseModel):
@@ -278,6 +279,8 @@ class AgentRunUsage(BaseModel):
 
     turns: int = Field(default=0, ge=0)
     elapsed_seconds: int = Field(default=0, alias="elapsedSeconds", ge=0)
+    input_tokens: int = Field(default=0, alias="inputTokens", ge=0)
+    output_tokens: int = Field(default=0, alias="outputTokens", ge=0)
     total_tokens: int = Field(default=0, alias="totalTokens", ge=0)
 
 
@@ -352,6 +355,7 @@ class AgentRunStartRequest(BaseModel):
     intent: str = Field(min_length=1)
     editor_version: EditorVersion = Field(alias="editorVersion")
     apply_mode: Literal["manual", "auto"] = Field(default="manual", alias="applyMode")
+    runtime_limits: AgentRunBudget | None = Field(default=None, alias="runtimeLimits")
 
 
 class AgentRunInputRequest(BaseModel):
@@ -389,6 +393,8 @@ class AgentRun(BaseModel):
     editor_version: EditorVersion = Field(alias="editorVersion")
     created_at: int = Field(alias="createdAt", ge=0)
     updated_at: int = Field(alias="updatedAt", ge=0)
+    active_elapsed_milliseconds: int = Field(default=0, alias="activeElapsedMilliseconds", ge=0)
+    active_started_at: int | None = Field(default=None, alias="activeStartedAt", ge=0)
     budget: AgentRunBudget
     usage: AgentRunUsage = Field(default_factory=AgentRunUsage)
     activities: list[AgentActivity] = Field(default_factory=list)
@@ -466,6 +472,7 @@ class ProviderInfo(BaseModel):
     label: str
     requires_api_key: bool = Field(alias="requiresApiKey")
     default_model: str | None = Field(default=None, alias="defaultModel")
+    default_runtime: AgentRunBudget = Field(alias="defaultRuntime")
 
 
 class AgentSettingsResponse(BaseModel):
@@ -473,6 +480,7 @@ class AgentSettingsResponse(BaseModel):
 
     default_provider: str = Field(alias="defaultProvider")
     default_model: str | None = Field(alias="defaultModel")
+    default_runtime: AgentRunBudget = Field(alias="defaultRuntime")
     providers: list[ProviderInfo]
 
 

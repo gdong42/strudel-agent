@@ -58,6 +58,7 @@ def build_run_budget(config: AgentRuntimeConfig) -> AgentRunBudget:
         maxTurns=config.max_turns,
         maxElapsedSeconds=config.max_elapsed_seconds,
         maxTotalTokens=config.max_total_tokens,
+        maxOutputTokensPerTurn=config.max_output_tokens_per_turn,
     )
 
 
@@ -100,6 +101,7 @@ def create_agent_run(
         editorVersion=editor_version,
         createdAt=timestamp,
         updatedAt=timestamp,
+        activeStartedAt=timestamp,
         budget=budget,
         provider=provider,
         model=model,
@@ -122,6 +124,8 @@ def append_model_turn(run: AgentRun, result: ModelTurnResult, *, now: int | None
     usage = AgentRunUsage(
         turns=run.usage.turns + 1,
         elapsedSeconds=run.usage.elapsed_seconds,
+        inputTokens=run.usage.input_tokens + result.usage.input_tokens,
+        outputTokens=run.usage.output_tokens + result.usage.output_tokens,
         totalTokens=run.usage.total_tokens + result.usage.total_tokens,
     )
     return _rebuild_run(
@@ -315,15 +319,28 @@ async def execute_model_turn(
     started_at = _timestamp(now)
     if failed_run := _budget_failure_before_turn(run, now=started_at):
         return failed_run
-    remaining_token_budget = max(run.budget.max_total_tokens - run.usage.total_tokens, 0)
+    max_output_tokens = run.budget.max_output_tokens_per_turn
+    if run.budget.max_total_tokens is not None:
+        remaining_total_tokens = max(run.budget.max_total_tokens - run.usage.total_tokens, 0)
+        max_output_tokens = min(max_output_tokens, remaining_total_tokens)
     request = ModelTurnRequest(
         messages=[message.model_copy(deep=True) for message in run.messages],
         tools=tools.definitions(),
         model=run.model,
-        remainingTokenBudget=remaining_token_budget,
+        maxOutputTokens=max_output_tokens,
     )
     try:
-        result = await _await_provider_turn(provider, request, cancellation, on_commentary)
+        remaining_active_seconds = _remaining_active_seconds(run, started_at)
+        async with asyncio.timeout(remaining_active_seconds):
+            result = await _await_provider_turn(provider, request, cancellation, on_commentary)
+    except TimeoutError:
+        return _fail_run(
+            run,
+            code="budget_exhausted",
+            message="The agent run exceeded its active time limit.",
+            retryable=False,
+            now=_timestamp(now),
+        )
     except ProviderError as error:
         if cancellation and cancellation.is_cancelled:
             return cancel_agent_run(run, now=_timestamp(now))
@@ -504,15 +521,15 @@ def _budget_failure_before_turn(run: AgentRun, *, now: int) -> AgentRun | None:
             retryable=False,
             now=now,
         )
-    if _elapsed_seconds(run, now) >= run.budget.max_elapsed_seconds:
+    if _active_elapsed_milliseconds(run, now) >= run.budget.max_elapsed_seconds * 1000:
         return _fail_run(
             run,
             code="budget_exhausted",
-            message="The agent run exceeded its time limit.",
+            message="The agent run exceeded its active time limit.",
             retryable=False,
             now=now,
         )
-    if run.usage.total_tokens >= run.budget.max_total_tokens:
+    if run.budget.max_total_tokens is not None and run.usage.total_tokens >= run.budget.max_total_tokens:
         return _fail_run(
             run,
             code="budget_exhausted",
@@ -524,15 +541,15 @@ def _budget_failure_before_turn(run: AgentRun, *, now: int) -> AgentRun | None:
 
 
 def _budget_failure_after_turn(run: AgentRun, *, now: int) -> AgentRun | None:
-    if _elapsed_seconds(run, now) >= run.budget.max_elapsed_seconds:
+    if _active_elapsed_milliseconds(run, now) >= run.budget.max_elapsed_seconds * 1000:
         return _fail_run(
             run,
             code="budget_exhausted",
-            message="The agent run exceeded its time limit.",
+            message="The agent run exceeded its active time limit.",
             retryable=False,
             now=now,
         )
-    if run.usage.total_tokens > run.budget.max_total_tokens:
+    if run.budget.max_total_tokens is not None and run.usage.total_tokens > run.budget.max_total_tokens:
         return _fail_run(
             run,
             code="budget_exhausted",
@@ -564,9 +581,12 @@ def _rebuild_run(run: AgentRun, *, now: int | None, **updates: Any) -> AgentRun:
         raise AgentRuntimeTransitionError("Agent Run timestamp cannot move backwards")
     payload = run.model_dump(by_alias=True)
     payload.update(updates)
+    active_elapsed_milliseconds = _active_elapsed_milliseconds(run, timestamp)
+    payload["activeElapsedMilliseconds"] = active_elapsed_milliseconds
+    payload["activeStartedAt"] = timestamp if payload["status"] == "running" else None
     usage = AgentRunUsage.model_validate(payload["usage"])
     payload["usage"] = usage.model_copy(
-        update={"elapsed_seconds": _elapsed_seconds(run, timestamp)}
+        update={"elapsed_seconds": active_elapsed_milliseconds // 1000}
     ).model_dump(by_alias=True)
     payload["updatedAt"] = timestamp
     return AgentRun.model_validate(payload)
@@ -581,5 +601,15 @@ def _timestamp(now: int | None) -> int:
     return int(time.time() * 1000) if now is None else now
 
 
-def _elapsed_seconds(run: AgentRun, timestamp: int) -> int:
-    return max(0, (timestamp - run.created_at) // 1000)
+def _active_elapsed_milliseconds(run: AgentRun, timestamp: int) -> int:
+    if run.status != "running":
+        return run.active_elapsed_milliseconds
+    started_at = run.active_started_at if run.active_started_at is not None else run.updated_at
+    return run.active_elapsed_milliseconds + max(0, timestamp - started_at)
+
+
+def _remaining_active_seconds(run: AgentRun, timestamp: int) -> float:
+    remaining_milliseconds = (
+        run.budget.max_elapsed_seconds * 1000 - _active_elapsed_milliseconds(run, timestamp)
+    )
+    return max(remaining_milliseconds / 1000, 0)

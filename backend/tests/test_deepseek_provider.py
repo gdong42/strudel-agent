@@ -84,7 +84,7 @@ async def test_deepseek_provider_normalizes_a_model_turn_and_tool_calls() -> Non
                 )
             ],
             model="runtime-model",
-            remainingTokenBudget=2048,
+            maxOutputTokens=2048,
         )
     )
 
@@ -160,7 +160,7 @@ async def test_deepseek_provider_streams_content_but_not_reasoning_or_tool_argum
         snapshots.append(commentary)
 
     result = await DeepSeekProvider("test-key", transport=httpx.MockTransport(handler)).next_turn_stream(
-        ModelTurnRequest(messages=[], tools=[], model="runtime-model", remainingTokenBudget=200),
+        ModelTurnRequest(messages=[], tools=[], model="runtime-model", maxOutputTokens=200),
         record_commentary,
     )
 
@@ -183,7 +183,7 @@ async def test_deepseek_provider_streams_content_but_not_reasoning_or_tool_argum
 async def test_deepseek_connection_checks_model_list() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/models"
-        return httpx.Response(200, json={"data": [{"id": "deepseek-v4-pro"}]})
+        return httpx.Response(200, json={"data": [{"id": "deepseek-v4-flash"}]})
 
     provider = DeepSeekProvider("test-key", transport=httpx.MockTransport(handler))
 
@@ -193,7 +193,7 @@ async def test_deepseek_connection_checks_model_list() -> None:
 @pytest.mark.anyio
 async def test_deepseek_connection_rejects_unavailable_model() -> None:
     transport = httpx.MockTransport(
-        lambda request: httpx.Response(200, json={"data": [{"id": "deepseek-v4-flash"}]})
+        lambda request: httpx.Response(200, json={"data": [{"id": "deepseek-v4-pro"}]})
     )
     provider = DeepSeekProvider("test-key", transport=transport)
 
@@ -220,5 +220,5 @@ async def test_deepseek_rejects_unusable_model_turn(choice: dict, message: str) 
 
     with pytest.raises(ProviderError, match=message):
         await DeepSeekProvider("test-key", transport=transport).next_turn(
-            ModelTurnRequest(messages=[], tools=[], model="runtime-model", remainingTokenBudget=1)
+            ModelTurnRequest(messages=[], tools=[], model="runtime-model", maxOutputTokens=1)
         )

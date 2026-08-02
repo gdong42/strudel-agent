@@ -34,6 +34,12 @@ describe('Agent Run bridge', () => {
         intent: 'make the drums tighter',
         editorVersion: { code: 's("bd*4")', hash: 'base-hash' },
         applyMode: 'manual',
+        runtimeLimits: {
+          maxTurns: 8,
+          maxElapsedSeconds: 900,
+          maxTotalTokens: null,
+          maxOutputTokensPerTurn: 65_536,
+        },
       },
       { provider: 'deepseek', model: 'deepseek-v4-pro', apiKey: 'browser-key' },
     )).resolves.toEqual(runningRun);
@@ -50,6 +56,12 @@ describe('Agent Run bridge', () => {
         intent: 'make the drums tighter',
         editorVersion: { code: 's("bd*4")', hash: 'base-hash' },
         applyMode: 'manual',
+        runtimeLimits: {
+          maxTurns: 8,
+          maxElapsedSeconds: 900,
+          maxTotalTokens: null,
+          maxOutputTokensPerTurn: 65_536,
+        },
       }),
     });
   });

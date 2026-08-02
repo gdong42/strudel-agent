@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { loadBrowserAgentSettings, saveBrowserAgentSettings } from '../../src/client/settings';
+import {
+  loadBrowserAgentSettings,
+  resolveAgentModelDefault,
+  resolveAgentRuntimeLimits,
+  saveBrowserAgentSettings,
+} from '../../src/client/settings';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -17,7 +22,10 @@ describe('browser agent settings', () => {
     const session = new MemoryStorage();
 
     saveBrowserAgentSettings(
-      { provider: 'openai', model: 'test-model', apiKey: 'secret', rememberApiKey: false },
+      {
+        provider: 'openai', model: 'test-model', apiKey: 'secret', rememberApiKey: false,
+        runtimeProfiles: {},
+      },
       local,
       session,
     );
@@ -25,6 +33,7 @@ describe('browser agent settings', () => {
     expect(JSON.stringify(storageValues(local))).not.toContain('secret');
     expect(loadBrowserAgentSettings(local, session)).toEqual({
       provider: 'openai', model: 'test-model', apiKey: 'secret', rememberApiKey: false,
+      runtimeProfiles: {},
     });
   });
 
@@ -33,7 +42,10 @@ describe('browser agent settings', () => {
     const session = new MemoryStorage();
 
     saveBrowserAgentSettings(
-      { provider: 'openai', model: null, apiKey: 'persistent-secret', rememberApiKey: true },
+      {
+        provider: 'openai', model: null, apiKey: 'persistent-secret', rememberApiKey: true,
+        runtimeProfiles: {},
+      },
       local,
       session,
     );
@@ -41,7 +53,58 @@ describe('browser agent settings', () => {
     expect(JSON.stringify(storageValues(session))).not.toContain('persistent-secret');
     expect(loadBrowserAgentSettings(local, session).apiKey).toBe('persistent-secret');
   });
+
+  it('uses the project model when the selected provider matches the backend default', () => {
+    const runtime = defaultRuntime();
+    const backend = {
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-flash',
+      defaultRuntime: runtime,
+      providers: [
+        {
+          id: 'deepseek', label: 'DeepSeek', requiresApiKey: true,
+          defaultModel: 'deepseek-v4-pro', defaultRuntime: runtime,
+        },
+        {
+          id: 'openai', label: 'OpenAI', requiresApiKey: true,
+          defaultModel: 'gpt-5.6-terra', defaultRuntime: runtime,
+        },
+      ],
+    };
+
+    expect(resolveAgentModelDefault(backend, 'deepseek')).toBe('deepseek-v4-flash');
+    expect(resolveAgentModelDefault(backend, 'openai')).toBe('gpt-5.6-terra');
+  });
+
+  it('resolves runtime overrides independently for each provider and model', () => {
+    const runtime = defaultRuntime();
+    const backend = {
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-flash',
+      defaultRuntime: runtime,
+      providers: [
+        {
+          id: 'deepseek', label: 'DeepSeek', requiresApiKey: true,
+          defaultModel: 'deepseek-v4-flash', defaultRuntime: runtime,
+        },
+      ],
+    };
+    const unlimited = { ...runtime, maxTotalTokens: null };
+    const profiles = { '["deepseek","deepseek-v4-flash"]': unlimited };
+
+    expect(resolveAgentRuntimeLimits(backend, profiles, 'deepseek', null)).toEqual(unlimited);
+    expect(resolveAgentRuntimeLimits(backend, profiles, 'deepseek', 'another-model')).toEqual(runtime);
+  });
 });
+
+function defaultRuntime() {
+  return {
+    maxTurns: 8,
+    maxElapsedSeconds: 900,
+    maxTotalTokens: 4_000_000,
+    maxOutputTokensPerTurn: 65_536,
+  };
+}
 
 function storageValues(storage: Storage): Array<string | null> {
   return Array.from({ length: storage.length }, (_, index) => storage.getItem(storage.key(index) ?? ''));

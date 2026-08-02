@@ -56,6 +56,7 @@
 - [x] **P4B1.4** Pass credentials to the backend per request without server persistence
 - [x] **P4B1.5** Add provider discovery, connection test, and settings tests
 - [x] **P4B1.6** Remove premature scope, intensity, timing, and avoid product fields
+- [x] **P4B1.7** Add per-provider/model runtime profiles, optional cumulative token limits, and Run-start snapshots
 
 ### Phase 4B.2: First Real Provider
 
@@ -64,7 +65,7 @@
 - [x] **P4B2.3** Add timeout, cancellation, and user-facing provider errors
 - [x] **P4B2.4** Add loading, cancellation, and duplicate-submit behavior to the agent panel
 - [x] **P4B2.5** Record provider, model, and latency without persisting credentials
-- [x] **P4B2.6** Add DeepSeek Chat Completions support and use `deepseek-v4-pro` by default
+- [x] **P4B2.6** Add DeepSeek Chat Completions support and use `deepseek-v4-flash` by default
 
 ### Phase 4B.3: Concurrent Editing and Automatic Reconciliation (Transitional)
 
@@ -132,6 +133,7 @@ workflow.
 - [x] **P4G.2.3** Add structured human musical review and aggregate evaluation reports
 - [ ] **P4G.3.1** Add an opt-in Provider baseline runner that accepts a one-time environment key and emits safe reports
 - [ ] **P4G.3.2** Run the selected Provider, complete human reviews, and tune instructions, tools, and budgets from measured results
+- [ ] **P4G.3.3** Compact repeated candidate and tool history when measured token growth justifies it
 
 ## Phase 5: Validation and Performance Hardening
 

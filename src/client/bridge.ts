@@ -50,6 +50,13 @@ export interface EditorVersion {
   hash: string;
 }
 
+export interface AgentRuntimeLimits {
+  maxTurns: number;
+  maxElapsedSeconds: number;
+  maxTotalTokens: number | null;
+  maxOutputTokensPerTurn: number;
+}
+
 export interface ChangeWarning {
   level: 'info' | 'warn' | 'risk';
   message: string;
@@ -116,6 +123,7 @@ export interface AgentRunStartPayload {
   intent: string;
   editorVersion: EditorVersion;
   applyMode: ApplyMode;
+  runtimeLimits?: AgentRuntimeLimits;
 }
 
 export interface AgentRunInputPayload {
@@ -156,11 +164,13 @@ export interface ProviderInfo {
   label: string;
   requiresApiKey: boolean;
   defaultModel: string | null;
+  defaultRuntime: AgentRuntimeLimits;
 }
 
 export interface AgentSettingsPayload {
   defaultProvider: string;
   defaultModel: string | null;
+  defaultRuntime: AgentRuntimeLimits;
   providers: ProviderInfo[];
 }
 

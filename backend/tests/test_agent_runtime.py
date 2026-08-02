@@ -39,7 +39,14 @@ def make_run() -> AgentRun:
         intent="  make the drums more energetic  ",
         editor_version=EditorVersion(code='s("bd")', hash="editor-hash"),
         apply_mode="manual",
-        budget=build_run_budget(AgentRuntimeConfig(maxTurns=3, maxElapsedSeconds=20, maxTotalTokens=1000)),
+        budget=build_run_budget(
+            AgentRuntimeConfig(
+                maxTurns=3,
+                maxElapsedSeconds=20,
+                maxTotalTokens=1000,
+                maxOutputTokensPerTurn=400,
+            )
+        ),
         provider="mock",
         model="mock-model",
         now=100,
@@ -156,6 +163,8 @@ def test_append_model_turn_rebuilds_the_run_and_tracks_usage() -> None:
     assert len(original.messages) == 2
     assert updated.messages[-1].tool_calls[0].name == "inspect_diff"
     assert updated.usage.turns == 1
+    assert updated.usage.input_tokens == 120
+    assert updated.usage.output_tokens == 30
     assert updated.usage.total_tokens == 150
     assert updated.updated_at == 125
 
@@ -366,7 +375,7 @@ async def test_scripted_provider_returns_turns_and_records_request_copies() -> N
         messages=[AgentMessage(role="user", content="Make it punchier.")],
         tools=[],
         model="test-model",
-        remainingTokenBudget=500,
+        maxOutputTokens=500,
     )
 
     result = await provider.next_turn(request)
@@ -415,14 +424,39 @@ async def test_execute_model_turn_runs_tools_in_provider_order_and_returns_inter
         "finalize_change",
         "request_user_input",
     ]
-    assert provider.requests[0].remaining_token_budget == 1000
+    assert provider.requests[0].max_output_tokens == 400
     assert [message.role for message in updated.messages] == ["system", "user", "assistant", "tool", "tool"]
     assert [result.name for result in updated.tool_results] == ["inspect_diff", "validate_candidate"]
     assert [result.call_id for result in updated.tool_results] == ["diff-1", "validate-1"]
     assert updated.tool_results[0].output["changed"] is True
     assert updated.tool_results[1].output["valid"] is True
     assert updated.usage.turns == 1
+    assert updated.usage.input_tokens == 100
+    assert updated.usage.output_tokens == 25
     assert updated.usage.total_tokens == 125
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_allows_unlimited_cumulative_tokens_with_a_per_turn_cap() -> None:
+    budget = build_run_budget(
+        AgentRuntimeConfig(
+            maxTurns=3,
+            maxElapsedSeconds=20,
+            maxTotalTokens=None,
+            maxOutputTokensPerTurn=65_536,
+        )
+    )
+    run = make_run().model_copy(
+        update={"budget": budget, "usage": AgentRunUsage(totalTokens=10_000_000)}
+    )
+    provider = ScriptedAgentProvider(
+        [ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="Continue."))]
+    )
+
+    updated = await execute_model_turn(run, provider, ToolRegistry(), now=110)
+
+    assert updated.status == "running"
+    assert provider.requests[0].max_output_tokens == 65_536
 
 
 @pytest.mark.anyio
@@ -510,7 +544,7 @@ async def test_execute_model_turn_sanitizes_malformed_provider_results() -> None
     ("usage", "now", "message"),
     [
         (AgentRunUsage(turns=3), 110, "The agent run reached its turn limit."),
-        (AgentRunUsage(), 20_100, "The agent run exceeded its time limit."),
+        (AgentRunUsage(), 20_100, "The agent run exceeded its active time limit."),
         (AgentRunUsage(totalTokens=1000), 110, "The agent run exhausted its token budget."),
     ],
 )
@@ -584,8 +618,71 @@ async def test_execute_model_turn_fails_when_a_provider_result_arrives_after_the
     assert failed.status == "failed"
     assert failed.failure is not None
     assert failed.failure.code == "budget_exhausted"
-    assert failed.failure.message == "The agent run exceeded its time limit."
+    assert failed.failure.message == "The agent run exceeded its active time limit."
     assert failed.usage.elapsed_seconds == 20
+
+
+@pytest.mark.anyio
+async def test_execute_model_turn_cancels_a_provider_at_the_active_time_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([100, 110])
+    monkeypatch.setattr(
+        "app.agent_runtime._timestamp",
+        lambda now: now if now is not None else next(timestamps),
+    )
+    provider = BlockingAgentProvider()
+    run = make_run().model_copy(
+        update={
+            "budget": make_run().budget.model_copy(update={"max_elapsed_seconds": 1}),
+            "active_elapsed_milliseconds": 990,
+        }
+    )
+
+    failed = await execute_model_turn(run, provider, ToolRegistry())
+
+    assert failed.status == "failed"
+    assert failed.failure is not None
+    assert failed.failure.code == "budget_exhausted"
+    assert failed.failure.message == "The agent run exceeded its active time limit."
+    assert failed.usage.elapsed_seconds == 1
+    assert provider.cancelled is True
+
+
+@pytest.mark.anyio
+async def test_agent_run_time_budget_excludes_time_waiting_for_user_input() -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    toolCalls=[
+                        ToolCall(
+                            id="input-1",
+                            name="request_user_input",
+                            arguments={
+                                "questionId": "tempo",
+                                "question": "Should the tempo stay at 124 BPM?",
+                                "options": [{"id": "keep", "label": "Keep 124 BPM"}],
+                                "reason": "The requested tempo is ambiguous.",
+                            },
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+
+    paused = await execute_model_turn(make_run(), provider, ToolRegistry(), now=5_100)
+    resumed = resume_agent_run(paused, question_id="tempo", answer="Keep it.", now=65_100)
+    updated = append_tool_results(resumed, [], now=70_100)
+
+    assert paused.status == "needs_input"
+    assert paused.usage.elapsed_seconds == 5
+    assert paused.active_started_at is None
+    assert resumed.usage.elapsed_seconds == 5
+    assert resumed.active_started_at == 65_100
+    assert updated.usage.elapsed_seconds == 10
 
 
 @pytest.mark.anyio

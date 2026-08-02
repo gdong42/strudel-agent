@@ -7,12 +7,13 @@
   },
   "agent": {
     "provider": "deepseek",
-    "model": "deepseek-v4-pro",
+    "model": "deepseek-v4-flash",
     "contextFile": "agent-context.md",
     "runtime": {
       "maxTurns": 8,
-      "maxElapsedSeconds": 90,
-      "maxTotalTokens": 50000
+      "maxElapsedSeconds": 900,
+      "maxTotalTokens": 4000000,
+      "maxOutputTokensPerTurn": 65536
     }
   },
   "samples": {

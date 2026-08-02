@@ -31,7 +31,7 @@ import { DiffView } from './diff';
 import { preflightCode } from './preflight';
 import { RecoveryView } from './recovery';
 import { createReplAdapter, type ReplAdapter } from './repl';
-import { SnapshotListView } from './snapshots';
+import { getSnapshotLabel, SnapshotListView } from './snapshots';
 import { SampleListView } from './samples';
 import { SettingsPanel } from './settings';
 import { RuntimeStateStore, type StagedAgentChange } from './state';
@@ -97,6 +97,12 @@ const settingsPanel = new SettingsPanel(
   requireElement<HTMLInputElement>('#settings-model'),
   requireElement<HTMLInputElement>('#settings-api-key'),
   requireElement<HTMLInputElement>('#settings-remember-key'),
+  requireElement<HTMLInputElement>('#settings-max-turns'),
+  requireElement<HTMLInputElement>('#settings-max-elapsed'),
+  requireElement<HTMLInputElement>('#settings-max-total-tokens'),
+  requireElement<HTMLInputElement>('#settings-max-output-tokens'),
+  requireElement<HTMLInputElement>('#settings-unlimited-total-tokens'),
+  requireElement<HTMLButtonElement>('#reset-runtime-limits'),
   requireElement<HTMLButtonElement>('#test-provider'),
   requireElement<HTMLButtonElement>('#clear-api-key'),
   requireElement<HTMLElement>('#settings-message'),
@@ -196,7 +202,7 @@ async function evaluate(): Promise<boolean> {
   try {
     await repl.evaluate();
     await saveTrack(code);
-    const snapshot = await createSnapshot(code);
+    const snapshot = await createSnapshot(code, getSnapshotLabel(code, state.get().changeSet));
     snapshotsCache = [snapshot, ...snapshotsCache.filter((item) => item.id !== snapshot.id)];
     renderSnapshots();
     repl.markClean();
@@ -219,8 +225,14 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
   status.set('Agent Run is starting...', 'warn');
   try {
     const editorVersion = await captureEditorVersion();
+    const runtimeLimits = settingsPanel.getRuntimeLimits();
     const run = await startAgentRun(
-      { intent: value.intent, editorVersion, applyMode: value.applyMode },
+      {
+        intent: value.intent,
+        editorVersion,
+        applyMode: value.applyMode,
+        ...(runtimeLimits ? { runtimeLimits } : {}),
+      },
       settingsPanel.getConnection(),
     );
     activeAgentRun = {

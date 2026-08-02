@@ -63,7 +63,7 @@ def test_model_turn_contract_uses_normalized_messages_and_tool_calls() -> None:
             )
         ],
         model="provider-model",
-        remainingTokenBudget=4096,
+        maxOutputTokens=4096,
     )
     result = ModelTurnResult(
         assistantMessage=AgentMessage(
@@ -74,7 +74,7 @@ def test_model_turn_contract_uses_normalized_messages_and_tool_calls() -> None:
         providerRequestId="provider-request-1",
     )
 
-    assert request.model_dump(by_alias=True)["remainingTokenBudget"] == 4096
+    assert request.model_dump(by_alias=True)["maxOutputTokens"] == 4096
     assert request.model_dump(by_alias=True)["messages"][1]["toolCalls"][0]["name"] == "inspect_diff"
     assert result.usage.total_tokens == 120
     assert result.model_dump(by_alias=True)["providerRequestId"] == "provider-request-1"

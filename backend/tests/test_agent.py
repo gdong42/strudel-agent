@@ -27,7 +27,7 @@ async def test_mock_provider_implements_model_turn_contract() -> None:
             ],
             tools=[],
             model="mock",
-            remainingTokenBudget=100,
+            maxOutputTokens=100,
         )
     )
 
@@ -65,7 +65,7 @@ async def test_mock_provider_uses_the_latest_runtime_editor_version() -> None:
             ],
             tools=[],
             model="mock",
-            remainingTokenBudget=100,
+            maxOutputTokens=100,
         )
     )
 

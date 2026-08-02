@@ -73,6 +73,19 @@
         <label>Model<input id="settings-model" type="text" placeholder="Use provider default"></label>
         <label>API key<input id="settings-api-key" type="password" autocomplete="off" placeholder="Not required"></label>
         <label class="remember-key"><input id="settings-remember-key" type="checkbox"> Remember on this device</label>
+        <details class="settings-advanced">
+          <summary>Runtime limits</summary>
+          <div class="settings-runtime-grid">
+            <label>Model turns<input id="settings-max-turns" type="number" min="1" step="1" required></label>
+            <label>Active time (seconds)<input id="settings-max-elapsed" type="number" min="1" step="1" required></label>
+            <label>Total tokens<input id="settings-max-total-tokens" type="number" min="1" step="1" required></label>
+            <label>Output tokens per turn<input id="settings-max-output-tokens" type="number" min="1" step="1" required></label>
+          </div>
+          <div class="settings-runtime-footer">
+            <label class="unlimited-tokens"><input id="settings-unlimited-total-tokens" type="checkbox"> Unlimited total tokens</label>
+            <button id="reset-runtime-limits" type="button">Restore defaults</button>
+          </div>
+        </details>
         <div class="settings-actions">
           <button id="test-provider" type="button">Test connection</button>
           <button id="clear-api-key" type="button">Clear key</button>

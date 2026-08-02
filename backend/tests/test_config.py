@@ -6,14 +6,15 @@ from app.config import load_config
 from app.paths import snapshots_dir, track_path
 
 
-def test_repository_defaults_to_deepseek_v4_pro() -> None:
+def test_repository_defaults_to_deepseek_v4_flash() -> None:
     config = load_config()
 
     assert config.agent.provider == "deepseek"
-    assert config.agent.model == "deepseek-v4-pro"
+    assert config.agent.model == "deepseek-v4-flash"
     assert config.agent.runtime.max_turns == 8
-    assert config.agent.runtime.max_elapsed_seconds == 90
-    assert config.agent.runtime.max_total_tokens == 50_000
+    assert config.agent.runtime.max_elapsed_seconds == 900
+    assert config.agent.runtime.max_total_tokens == 4_000_000
+    assert config.agent.runtime.max_output_tokens_per_turn == 65_536
     assert config.agent.context_file == "agent-context.md"
 
 
@@ -40,7 +41,8 @@ def test_load_config_reads_project_config(tmp_path: Path, monkeypatch) -> None:
             "runtime": {
               "maxTurns": 3,
               "maxElapsedSeconds": 12,
-              "maxTotalTokens": 900
+              "maxTotalTokens": 900,
+              "maxOutputTokensPerTurn": 256
             }
           },
           "snapshots": {
@@ -62,6 +64,17 @@ def test_load_config_reads_project_config(tmp_path: Path, monkeypatch) -> None:
     assert config.agent.runtime.max_turns == 3
     assert config.agent.runtime.max_elapsed_seconds == 12
     assert config.agent.runtime.max_total_tokens == 900
+    assert config.agent.runtime.max_output_tokens_per_turn == 256
     assert config.agent.context_file == "set/context.md"
     assert track_path() == tmp_path / "tracks" / "live.strudel.js"
     assert snapshots_dir() == tmp_path / "history"
+
+
+def test_load_config_accepts_an_unlimited_total_token_budget(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STRUDEL_AGENT_ROOT", str(tmp_path))
+    (tmp_path / "project.config.json").write_text(
+        '{"agent":{"runtime":{"maxTotalTokens":null}}}',
+        encoding="utf-8",
+    )
+
+    assert load_config().agent.runtime.max_total_tokens is None

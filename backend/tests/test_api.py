@@ -142,25 +142,84 @@ def test_agent_settings_exposes_defaults_without_secrets(project_paths: dict[str
     response = client.get("/agent/settings")
 
     assert response.status_code == 200
+    runtime = {
+        "maxTurns": 8,
+        "maxElapsedSeconds": 900,
+        "maxTotalTokens": 4_000_000,
+        "maxOutputTokensPerTurn": 65_536,
+    }
     assert response.json() == {
         "defaultProvider": "mock",
         "defaultModel": None,
+        "defaultRuntime": runtime,
         "providers": [
-            {"id": "mock", "label": "Mock", "requiresApiKey": False, "defaultModel": None},
+            {
+                "id": "mock",
+                "label": "Mock",
+                "requiresApiKey": False,
+                "defaultModel": None,
+                "defaultRuntime": runtime,
+            },
             {
                 "id": "deepseek",
                 "label": "DeepSeek",
                 "requiresApiKey": True,
-                "defaultModel": "deepseek-v4-pro",
+                "defaultModel": "deepseek-v4-flash",
+                "defaultRuntime": runtime,
             },
             {
                 "id": "openai",
                 "label": "OpenAI",
                 "requiresApiKey": True,
                 "defaultModel": "gpt-5.6-terra",
+                "defaultRuntime": runtime,
             },
         ],
     }
+
+
+def test_start_agent_run_snapshots_browser_runtime_limits(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = ScriptedAgentProvider([])
+    manager = AgentRunManager()
+    captured: dict[str, Any] = {}
+    start = manager.start
+
+    async def capture_start(**kwargs: Any):
+        captured["budget"] = kwargs["budget"]
+        return await start(**kwargs)
+
+    monkeypatch.setattr(manager, "start", capture_start)
+    monkeypatch.setattr(main, "agent_runs", manager)
+    monkeypatch.setattr(
+        main,
+        "create_agent_service",
+        lambda *args, **kwargs: AgentService(provider, provider_name="mock", model="mock"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/agent/runs",
+            json={
+                "intent": "Make it groovier.",
+                "editorVersion": {"code": 's("bd")', "hash": "editor-hash"},
+                "applyMode": "manual",
+                "runtimeLimits": {
+                    "maxTurns": 12,
+                    "maxElapsedSeconds": 1200,
+                    "maxTotalTokens": None,
+                    "maxOutputTokensPerTurn": 131_072,
+                },
+            },
+        )
+
+        assert response.status_code == 202
+        budget = captured["budget"]
+        assert budget.max_turns == 12
+        assert budget.max_elapsed_seconds == 1200
+        assert budget.max_total_tokens is None
+        assert budget.max_output_tokens_per_turn == 131_072
 
 
 def test_mock_provider_connection(project_paths: dict[str, Path]) -> None:

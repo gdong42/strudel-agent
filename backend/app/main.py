@@ -158,10 +158,12 @@ async def get_samples() -> dict[str, Any]:
 @app.get("/agent/settings")
 async def get_agent_settings() -> dict[str, Any]:
     config = load_config().agent
+    default_runtime = build_run_budget(config.runtime)
     return AgentSettingsResponse(
         defaultProvider=config.provider,
         defaultModel=config.model,
-        providers=list_provider_info(),
+        defaultRuntime=default_runtime,
+        providers=list_provider_info(default_runtime),
     ).model_dump(by_alias=True)
 
 
@@ -201,7 +203,11 @@ async def start_agent_run(
             intent=payload.intent,
             editor_version=payload.editor_version,
             apply_mode=payload.apply_mode,
-            budget=build_run_budget(config.agent.runtime),
+            budget=(
+                payload.runtime_limits.model_copy(deep=True)
+                if payload.runtime_limits is not None
+                else build_run_budget(config.agent.runtime)
+            ),
             provider_name=service.provider_name,
             model=service.model or service.provider_name,
             provider=service.provider,

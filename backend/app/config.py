@@ -19,8 +19,9 @@ class SnapshotConfig(BaseModel):
 
 class AgentRuntimeConfig(BaseModel):
     max_turns: int = Field(default=8, alias="maxTurns", ge=1)
-    max_elapsed_seconds: int = Field(default=90, alias="maxElapsedSeconds", ge=1)
-    max_total_tokens: int = Field(default=50_000, alias="maxTotalTokens", ge=1)
+    max_elapsed_seconds: int = Field(default=900, alias="maxElapsedSeconds", ge=1)
+    max_total_tokens: int | None = Field(default=4_000_000, alias="maxTotalTokens", ge=1)
+    max_output_tokens_per_turn: int = Field(default=65_536, alias="maxOutputTokensPerTurn", ge=1)
 
 
 class AgentConfig(BaseModel):

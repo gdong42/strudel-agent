@@ -16,7 +16,7 @@ from .base import CommentaryEmitter, ModelCommentaryCallback, ProviderError, par
 from .http import ProviderHttpClient
 
 
-DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-pro"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/"
 
 class DeepSeekProvider:
@@ -113,13 +113,13 @@ class DeepSeekProvider:
             raise ProviderError(f'DeepSeek model "{self.model}" is not available for this API key')
 
     def _turn_payload(self, request: ModelTurnRequest, *, stream: bool) -> dict[str, object]:
-        if request.remaining_token_budget == 0:
-            raise ProviderError("DeepSeek model turn has no remaining token budget")
+        if request.max_output_tokens == 0:
+            raise ProviderError("DeepSeek model turn has no output token budget")
         payload: dict[str, object] = {
             "model": request.model,
             "messages": [self._turn_message(message) for message in request.messages],
             "thinking": {"type": "disabled"},
-            "max_tokens": request.remaining_token_budget,
+            "max_tokens": request.max_output_tokens,
             "stream": stream,
         }
         if stream:

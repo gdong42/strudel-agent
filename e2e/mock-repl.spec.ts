@@ -146,7 +146,15 @@ test('snapshot list can revert to an earlier snapshot', async ({ page }) => {
   await page.getByRole('button', { name: 'Evaluate' }).click();
   await expect(page.locator('#status')).toContainText('Playing');
 
-  await page.locator('.snapshot-item').filter({ hasText: 's("first")' }).getByRole('button', { name: 'Revert' }).click();
+  const latestSnapshot = page.locator('.snapshot-item').first();
+  await expect(latestSnapshot.locator('.snapshot-latest')).toHaveText('Latest');
+  await expect(latestSnapshot.locator('.snapshot-additions')).toHaveText('+1');
+  await expect(latestSnapshot.locator('.snapshot-removals')).toHaveText('-1');
+  await expect(latestSnapshot.locator('.snapshot-preview')).toContainText('+ s("second")');
+  await latestSnapshot.locator('.snapshot-diff-details summary').click();
+  await expect(latestSnapshot.locator('.snapshot-diff-lines')).toContainText('+ s("second")');
+
+  await page.locator('.snapshot-item').nth(1).getByRole('button', { name: 'Revert' }).click();
 
   await expect(page.getByTestId('mock-editor')).toHaveValue('s("first")');
   await expect(page.locator('#status')).toContainText('Reverted to snapshot');
@@ -749,6 +757,12 @@ test('a browser reload restores a paused Agent Run without storing credentials',
 });
 
 test('agent settings use backend defaults and persist browser overrides', async ({ page }) => {
+  let runRequest: Record<string, unknown> | null = null;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/agent/runs')) {
+      runRequest = request.postDataJSON() as Record<string, unknown>;
+    }
+  });
   await page.goto('/');
   await expect(page.locator('#agent-provider-summary')).toHaveText('mock');
 
@@ -764,10 +778,28 @@ test('agent settings use backend defaults and persist browser overrides', async 
   await expect(page.locator('#settings-message')).toContainText('ready');
 
   await page.locator('#settings-model').fill('local-test-model');
+  await page.locator('#settings-model').press('Tab');
+  await page.locator('.settings-advanced summary').click();
+  await expect(page.locator('#settings-max-turns')).toHaveValue('8');
+  await expect(page.locator('#settings-max-elapsed')).toHaveValue('900');
+  await expect(page.locator('#settings-max-total-tokens')).toHaveValue('4000000');
+  await expect(page.locator('#settings-max-output-tokens')).toHaveValue('65536');
+  await page.locator('#settings-unlimited-total-tokens').check();
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('#settings-dialog')).not.toBeVisible();
   await expect(page.locator('#agent-provider-summary')).toHaveText('mock / local-test-model');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v1'))).toContain('local-test-model');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v1'))).toContain('"maxTotalTokens":null');
+
+  await page.locator('#agent-intent').fill('Make it groovier.');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+  await expect.poll(() => runRequest).not.toBeNull();
+  expect(runRequest?.runtimeLimits).toEqual({
+    maxTurns: 8,
+    maxElapsedSeconds: 900,
+    maxTotalTokens: null,
+    maxOutputTokensPerTurn: 65_536,
+  });
 });
 
 declare global {

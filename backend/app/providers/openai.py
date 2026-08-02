@@ -75,13 +75,13 @@ class OpenAIProvider:
         await self.http.request_json("GET", f"models/{quote(self.model, safe='')}")
 
     def _turn_payload(self, request: ModelTurnRequest) -> dict[str, object]:
-        if request.remaining_token_budget == 0:
-            raise ProviderError("OpenAI model turn has no remaining token budget")
+        if request.max_output_tokens == 0:
+            raise ProviderError("OpenAI model turn has no output token budget")
         payload: dict[str, object] = {
             "model": request.model,
             "store": False,
             "input": self._turn_input(request.messages),
-            "max_output_tokens": request.remaining_token_budget,
+            "max_output_tokens": request.max_output_tokens,
         }
         instructions = self._instructions(request.messages)
         if instructions:

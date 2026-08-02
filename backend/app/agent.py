@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .config import load_config
-from .models import ProviderInfo
+from .models import AgentRunBudget, ProviderInfo
 from .providers.base import AgentProvider
 from .providers.deepseek import DEFAULT_DEEPSEEK_MODEL, DeepSeekProvider
 from .providers.mock import MockProvider
@@ -47,19 +47,26 @@ def create_agent_service(
     raise AgentConfigurationError(f'Unknown agent provider: "{selected}"')
 
 
-def list_provider_info() -> list[ProviderInfo]:
+def list_provider_info(default_runtime: AgentRunBudget) -> list[ProviderInfo]:
     return [
-        ProviderInfo(id="mock", label="Mock", requiresApiKey=False),
+        ProviderInfo(
+            id="mock",
+            label="Mock",
+            requiresApiKey=False,
+            defaultRuntime=default_runtime.model_copy(deep=True),
+        ),
         ProviderInfo(
             id="deepseek",
             label="DeepSeek",
             requiresApiKey=True,
             defaultModel=DEFAULT_DEEPSEEK_MODEL,
+            defaultRuntime=default_runtime.model_copy(deep=True),
         ),
         ProviderInfo(
             id="openai",
             label="OpenAI",
             requiresApiKey=True,
             defaultModel=DEFAULT_OPENAI_MODEL,
+            defaultRuntime=default_runtime.model_copy(deep=True),
         ),
     ]

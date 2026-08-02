@@ -80,7 +80,7 @@ async def test_openai_provider_normalizes_a_model_turn_and_tool_calls() -> None:
                 )
             ],
             model="runtime-model",
-            remainingTokenBudget=2048,
+            maxOutputTokens=2048,
         )
     )
 
@@ -135,7 +135,7 @@ async def test_openai_provider_streams_only_public_text_and_rebuilds_the_final_t
         snapshots.append(commentary)
 
     result = await OpenAIProvider("test-key", transport=httpx.MockTransport(handler)).next_turn_stream(
-        ModelTurnRequest(messages=[], tools=[], model="runtime-model", remainingTokenBudget=200),
+        ModelTurnRequest(messages=[], tools=[], model="runtime-model", maxOutputTokens=200),
         record_commentary,
     )
 
@@ -173,7 +173,7 @@ async def test_openai_provider_rejects_invalid_tool_arguments() -> None:
 
     with pytest.raises(ProviderError, match="invalid tool arguments"):
         await OpenAIProvider("test-key", transport=transport).next_turn(
-            ModelTurnRequest(messages=[], tools=[], model="runtime-model", remainingTokenBudget=1)
+            ModelTurnRequest(messages=[], tools=[], model="runtime-model", maxOutputTokens=1)
         )
 
 
@@ -183,7 +183,7 @@ async def test_openai_provider_rejects_an_empty_model_turn() -> None:
 
     with pytest.raises(ProviderError, match="empty model turn"):
         await OpenAIProvider("test-key", transport=transport).next_turn(
-            ModelTurnRequest(messages=[], tools=[], model="runtime-model", remainingTokenBudget=1)
+            ModelTurnRequest(messages=[], tools=[], model="runtime-model", maxOutputTokens=1)
         )
 
 
