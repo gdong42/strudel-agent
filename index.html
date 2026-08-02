@@ -26,43 +26,66 @@
       </section>
       <aside class="side-panel" aria-label="Project status">
         <section class="agent-panel" aria-labelledby="agent-heading">
-          <h2 id="agent-heading">Agent</h2>
-          <form id="agent-form">
+          <div class="agent-panel-header">
+            <h2 id="agent-heading">Agent</h2>
+            <p class="provider-summary">Provider: <span id="agent-provider-summary">loading...</span></p>
+            <button id="open-snapshots" class="snapshot-trigger" type="button" aria-label="Open snapshots">Snapshots <span id="snapshot-count">0</span></button>
+          </div>
+          <div id="agent-transcript" class="agent-transcript">
+            <div id="agent-turn-history" class="agent-turn-history"></div>
+            <article id="agent-current-turn" class="agent-turn agent-turn-current">
+              <p id="agent-user-message" class="agent-message agent-message-user" hidden></p>
+              <details id="agent-activity" class="agent-activity" hidden open>
+                <summary class="agent-activity-header">
+                  <strong id="agent-activity-summary">Starting</strong>
+                  <time id="agent-activity-elapsed">00:00</time>
+                </summary>
+                <ol id="agent-activity-list" class="agent-activity-list" aria-live="polite"></ol>
+              </details>
+              <section id="agent-question" class="agent-question" aria-live="polite" hidden>
+                <form id="agent-question-form">
+                  <fieldset class="agent-question-fieldset">
+                    <legend id="agent-question-text"></legend>
+                    <div id="agent-question-options" class="agent-question-options" role="radiogroup"></div>
+                    <textarea id="agent-question-answer" rows="2" aria-label="Clarification answer" placeholder="Your response"></textarea>
+                  </fieldset>
+                  <div class="agent-question-actions"><button id="agent-question-submit" type="submit" disabled>Continue</button></div>
+                </form>
+              </section>
+              <div id="agent-result" class="agent-result" hidden>
+                <p id="agent-explanation"></p>
+                <div id="agent-warnings" aria-live="polite"></div>
+                <div id="agent-diff" class="diff-view" aria-label="Staged code diff"></div>
+              </div>
+            </article>
+          </div>
+          <form id="agent-form" class="agent-composer">
             <textarea id="agent-intent" rows="3" placeholder="Describe a musical change" required></textarea>
-            <label class="auto-fire"><input id="auto-fire" type="checkbox"> Auto Fire</label>
-            <div class="agent-actions"><button id="stage-change" type="submit">Stage change</button><button id="cancel-change" type="button" hidden>Cancel</button><button id="undo-change" type="button" disabled>Undo</button></div>
-          </form>
-          <section id="agent-activity" class="agent-activity" hidden>
-            <div class="agent-activity-header">
-              <strong id="agent-activity-summary">Starting</strong>
-              <time id="agent-activity-elapsed">00:00</time>
+            <div class="agent-composer-controls">
+              <label class="auto-fire"><input id="auto-fire" type="checkbox"> Auto Fire</label>
+              <div class="agent-actions"><button id="stage-change" type="submit">Stage change</button><button id="cancel-change" type="button" hidden>Cancel</button><button id="undo-change" type="button" disabled>Undo</button></div>
             </div>
-            <ol id="agent-activity-list" class="agent-activity-list" aria-live="polite"></ol>
-          </section>
-          <section id="agent-question" class="agent-question" aria-live="polite" hidden>
-            <form id="agent-question-form">
-              <fieldset class="agent-question-fieldset">
-                <legend id="agent-question-text"></legend>
-                <div id="agent-question-options" class="agent-question-options" role="radiogroup"></div>
-                <textarea id="agent-question-answer" rows="2" aria-label="Clarification answer" placeholder="Your response"></textarea>
-              </fieldset>
-              <div class="agent-question-actions"><button id="agent-question-submit" type="submit" disabled>Continue</button></div>
-            </form>
-          </section>
-          <p class="provider-summary">Provider: <span id="agent-provider-summary">loading...</span></p>
-          <p id="agent-explanation">No staged agent change.</p>
-          <div id="agent-warnings" aria-live="polite"></div>
-          <div id="agent-diff" class="diff-view" aria-label="Staged code diff"></div>
+          </form>
         </section>
         <h2>Track</h2>
         <p><code>tracks/main.strudel.js</code></p>
         <p>Evaluate fires the Strudel REPL, then saves a snapshot only if evaluation succeeds.</p>
         <h2>Samples</h2>
         <div id="sample-list" class="sample-list" aria-live="polite"></div>
-        <h2>Snapshots</h2>
-        <div id="snapshot-list" class="snapshot-list" aria-live="polite">No snapshots yet.</div>
       </aside>
     </main>
+    <dialog id="snapshots-dialog" class="snapshot-drawer" aria-labelledby="snapshots-heading">
+      <div class="snapshot-drawer-shell">
+        <div class="snapshot-drawer-header">
+          <div>
+            <h2 id="snapshots-heading">Snapshots</h2>
+            <p>Evaluation history</p>
+          </div>
+          <button id="close-snapshots" type="button" aria-label="Close snapshots">Close</button>
+        </div>
+        <div id="snapshot-list" class="snapshot-list" aria-live="polite">No snapshots yet.</div>
+      </div>
+    </dialog>
     <dialog id="settings-dialog" aria-labelledby="settings-heading">
       <form id="settings-form" class="settings-form">
         <div class="dialog-heading">

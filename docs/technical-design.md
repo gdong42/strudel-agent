@@ -428,7 +428,11 @@ update bounded public activity metadata. Provider reasoning, raw events, and
 tool payloads remain internal. When the SSE connection opens or reconnects, the
 browser also refreshes its active Run by ID so the complete bounded activity
 timeline, a pause, or a terminal state is not missed while the stream was
-unavailable.
+unavailable. While a Run is active, each running update also arms a short stale
+update watchdog. If no newer SSE event arrives before it expires, the browser
+refreshes that Run by ID and rearms only while it remains running. This polling
+fallback covers missed terminal events and proxy/backend reconnect gaps without
+adding steady polling while SSE updates are healthy.
 
 `POST /agent/runs/:id/input` accepts the pending question ID and an answer. It
 recreates a short-lived provider worker from the browser's transient provider

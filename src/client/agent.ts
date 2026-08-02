@@ -29,6 +29,7 @@ export class AgentPanel {
   private questionOptionInputs: HTMLInputElement[] = [];
   private activityRunId: string | null = null;
   private activityStartedAt = 0;
+  private activityCompletedAt: number | null = null;
   private activityTimer: number | null = null;
   private activityStatus: AgentRunPublic['status'] = 'running';
   private activityTurn: number | null = null;
@@ -40,9 +41,15 @@ export class AgentPanel {
     private readonly submit: HTMLButtonElement,
     private readonly cancel: HTMLButtonElement,
     private readonly undo: HTMLButtonElement,
+    private readonly transcript: HTMLElement,
+    private readonly turnHistory: HTMLElement,
+    private readonly currentTurn: HTMLElement,
+    private readonly userMessage: HTMLElement,
+    private readonly result: HTMLElement,
     private readonly explanation: HTMLElement,
     private readonly warnings: HTMLElement,
-    private readonly activity: HTMLElement,
+    private readonly diff: HTMLElement,
+    private readonly activity: HTMLDetailsElement,
     private readonly activitySummary: HTMLElement,
     private readonly activityElapsed: HTMLTimeElement,
     private readonly activityList: HTMLOListElement,
@@ -96,18 +103,37 @@ export class AgentPanel {
     this.autoFire.disabled = !available || this.submit.disabled;
   }
 
+  acceptSubmission(submittedIntent: string): void {
+    this.showSubmission(submittedIntent);
+    if (this.intent.value.trim() === submittedIntent.trim()) {
+      this.intent.value = '';
+    }
+  }
+
+  showSubmission(submittedIntent: string): void {
+    this.userMessage.textContent = submittedIntent;
+    this.userMessage.hidden = false;
+    this.scrollToLatest(true);
+  }
+
   startActivity(): void {
+    this.archiveCurrentTurn();
+    this.resetCurrentTurn();
     this.activityRunId = null;
     this.activityStartedAt = Math.floor(Date.now() / 1000);
+    this.activityCompletedAt = null;
     this.activityStatus = 'running';
     this.activityTurn = null;
     this.activity.hidden = false;
+    this.activity.open = true;
     this.activityList.replaceChildren(this.activityItem('Starting Agent Run', 'running'));
     this.startActivityTimer();
     this.renderActivitySummary();
+    this.scrollToLatest(true);
   }
 
   showActivity(run: Pick<AgentRunPublic, 'id' | 'status' | 'activities'>): void {
+    const followLatest = this.isNearLatest();
     const activities = [...(run.activities ?? [])].sort((left, right) => left.sequence - right.sequence);
     const firstStartedAt = activities[0]?.startedAt;
     if (this.activityRunId !== run.id) {
@@ -118,44 +144,59 @@ export class AgentPanel {
     }
 
     this.activityStatus = run.status;
+    this.activityCompletedAt = run.status === 'running'
+      ? null
+      : activities.reduce<number | null>((latest, item) => (
+          item.completedAt === null ? latest : Math.max(latest ?? item.completedAt, item.completedAt)
+        ), null) ?? Math.floor(Date.now() / 1000);
     this.activityTurn = [...activities].reverse().find((item) => item.kind === 'model_turn')?.turn ?? null;
     const visible = activities.slice(-24).map((item) => this.renderActivityItem(item));
     if (visible.length === 0 && run.status === 'running') {
       visible.push(this.activityItem('Starting Agent Run', 'running'));
     }
     this.activityList.replaceChildren(...visible);
-    this.activityList.scrollTop = this.activityList.scrollHeight;
     this.activity.hidden = visible.length === 0;
+    this.activity.open = run.status === 'running';
 
     if (run.status === 'running') this.startActivityTimer();
     else this.stopActivityTimer();
     this.renderActivitySummary();
+    this.scrollToLatest(followLatest);
   }
 
   clearActivity(): void {
     this.stopActivityTimer();
     this.activityRunId = null;
     this.activityStartedAt = 0;
+    this.activityCompletedAt = null;
     this.activityTurn = null;
     this.activity.hidden = true;
     this.activityList.replaceChildren();
   }
 
   showChange(change: Pick<AgentFinalChange, 'explanation' | 'warnings'>): void {
+    const followLatest = this.isNearLatest();
     this.explanation.textContent = change.explanation;
     this.renderWarnings(change.warnings);
+    this.result.hidden = false;
     this.undo.disabled = false;
+    this.scrollToLatest(followLatest);
   }
 
   showNoop(change: Pick<AgentFinalChange, 'explanation' | 'warnings'>): void {
+    const followLatest = this.isNearLatest();
     this.explanation.textContent = change.explanation;
     this.renderWarnings(change.warnings);
+    this.result.hidden = false;
     this.undo.disabled = true;
+    this.scrollToLatest(followLatest);
   }
 
   clearChange(): void {
-    this.explanation.textContent = 'No staged agent change.';
+    this.result.hidden = true;
+    this.explanation.textContent = '';
     this.warnings.replaceChildren();
+    this.diff.replaceChildren();
     this.undo.disabled = true;
   }
 
@@ -165,6 +206,7 @@ export class AgentPanel {
       return;
     }
 
+    const followLatest = this.isNearLatest();
     this.currentQuestion = question;
     this.questionBusy = false;
     this.questionText.textContent = question.question;
@@ -200,6 +242,7 @@ export class AgentPanel {
     this.questionOptions.replaceChildren(...options);
     this.question.hidden = false;
     this.updateQuestionControls();
+    this.scrollToLatest(followLatest);
   }
 
   clearQuestion(): void {
@@ -238,6 +281,45 @@ export class AgentPanel {
       item.textContent = warning.message;
       return item;
     }));
+  }
+
+  private archiveCurrentTurn(): void {
+    if (this.userMessage.hidden) return;
+
+    const archived = this.currentTurn.cloneNode(true) as HTMLElement;
+    archived.removeAttribute('id');
+    archived.classList.remove('agent-turn-current');
+    archived.classList.add('agent-turn-archived');
+    archived.querySelectorAll('[hidden]').forEach((element) => element.remove());
+    archived.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+    archived.querySelectorAll('[aria-live]').forEach((element) => element.removeAttribute('aria-live'));
+    archived.querySelectorAll('details').forEach((element) => { element.open = false; });
+    this.turnHistory.append(archived);
+    while (this.turnHistory.childElementCount > 20) {
+      this.turnHistory.firstElementChild?.remove();
+    }
+  }
+
+  private resetCurrentTurn(): void {
+    this.userMessage.hidden = true;
+    this.userMessage.textContent = '';
+    this.clearActivity();
+    this.clearQuestion();
+    this.result.hidden = true;
+    this.explanation.textContent = '';
+    this.warnings.replaceChildren();
+    this.diff.replaceChildren();
+  }
+
+  private isNearLatest(): boolean {
+    return this.transcript.scrollHeight - this.transcript.scrollTop - this.transcript.clientHeight < 48;
+  }
+
+  private scrollToLatest(force = false): void {
+    if (!force && !this.isNearLatest()) return;
+    requestAnimationFrame(() => {
+      this.transcript.scrollTop = this.transcript.scrollHeight;
+    });
   }
 
   private renderActivityItem(activity: AgentActivity): HTMLLIElement {
@@ -297,15 +379,18 @@ export class AgentPanel {
   private renderActivitySummary(): void {
     const labels: Record<AgentRunPublic['status'], string> = {
       running: 'Working',
-      needs_input: 'Waiting for your answer',
-      completed: 'Completed',
-      failed: 'Stopped',
-      cancelled: 'Cancelled',
+      needs_input: 'Worked for',
+      completed: 'Worked for',
+      failed: 'Stopped after',
+      cancelled: 'Cancelled after',
     };
     const turn = this.activityStatus === 'running' && this.activityTurn ? ` · Turn ${this.activityTurn}` : '';
     this.activitySummary.textContent = `${labels[this.activityStatus]}${turn}`;
-    const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - this.activityStartedAt);
-    this.activityElapsed.textContent = formatDuration(elapsed);
+    const endedAt = this.activityCompletedAt ?? Math.floor(Date.now() / 1000);
+    const elapsed = Math.max(0, endedAt - this.activityStartedAt);
+    this.activityElapsed.textContent = this.activityStatus === 'running'
+      ? formatDuration(elapsed)
+      : formatCompactDuration(elapsed);
     this.activityElapsed.dateTime = `PT${elapsed}S`;
   }
 }
@@ -324,4 +409,13 @@ function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.max(0, totalSeconds % 60);
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatCompactDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.max(0, totalSeconds % 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }

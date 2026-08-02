@@ -78,7 +78,6 @@ test('evaluate success saves track and creates snapshot', async ({ page }) => {
   });
 
   await page.goto('/');
-  await expect(page.getByTestId('mock-editor')).toHaveValue(/bd/);
   await page.getByTestId('mock-editor').fill('s("bd*4")');
   await page.getByRole('button', { name: 'Evaluate' }).click();
 
@@ -138,6 +137,8 @@ test('revert restores the last successful evaluation', async ({ page }) => {
 
 test('snapshot list can revert to an earlier snapshot', async ({ page }) => {
   await page.goto('/');
+  await expect(page.locator('#snapshots-dialog')).toBeHidden();
+  const initialSnapshotCount = Number(await page.locator('#snapshot-count').textContent());
   await page.getByTestId('mock-editor').fill('s("first")');
   await page.getByRole('button', { name: 'Evaluate' }).click();
   await expect(page.locator('#status')).toContainText('Playing');
@@ -145,6 +146,10 @@ test('snapshot list can revert to an earlier snapshot', async ({ page }) => {
   await page.getByTestId('mock-editor').fill('s("second")');
   await page.getByRole('button', { name: 'Evaluate' }).click();
   await expect(page.locator('#status')).toContainText('Playing');
+  await expect(page.locator('#snapshot-count')).toHaveText(String(initialSnapshotCount + 2));
+
+  await page.locator('#open-snapshots').click();
+  await expect(page.locator('#snapshots-dialog')).toBeVisible();
 
   const latestSnapshot = page.locator('.snapshot-item').first();
   await expect(latestSnapshot.locator('.snapshot-latest')).toHaveText('Latest');
@@ -156,6 +161,7 @@ test('snapshot list can revert to an earlier snapshot', async ({ page }) => {
 
   await page.locator('.snapshot-item').nth(1).getByRole('button', { name: 'Revert' }).click();
 
+  await expect(page.locator('#snapshots-dialog')).toBeHidden();
   await expect(page.getByTestId('mock-editor')).toHaveValue('s("first")');
   await expect(page.locator('#status')).toContainText('Reverted to snapshot');
 });
@@ -217,6 +223,8 @@ test('manual agent change stages diff without evaluating and can be undone', asy
   await page.locator('#agent-intent').fill('make the drums tighter');
   await page.getByRole('button', { name: 'Stage change' }).click();
 
+  await expect(page.locator('#agent-intent')).toHaveValue('');
+  await expect(page.locator('#agent-user-message')).toHaveText('make the drums tighter');
   await expect(page.getByTestId('mock-editor')).toHaveValue(/Agent draft: make the drums tighter/);
   await expect(page.locator('#agent-diff')).toContainText('+ // Agent draft');
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
@@ -238,6 +246,48 @@ test('manual agent change stages diff without evaluating and can be undone', asy
 
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByTestId('mock-editor')).toHaveValue(before);
+});
+
+test('agent composer stays below the transcript and preserves an instruction when startup fails', async ({ page }) => {
+  await page.route('**/agent/runs', async (route) => {
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Provider unavailable.' }) });
+  });
+
+  await page.goto('/');
+  expect(await page.locator('#agent-transcript').evaluate((transcript) => (
+    Boolean(transcript.compareDocumentPosition(document.querySelector('#agent-form')) & Node.DOCUMENT_POSITION_FOLLOWING)
+  ))).toBe(true);
+  await page.locator('#agent-intent').fill('add brighter chords');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.locator('#status')).toContainText('Provider unavailable');
+  await expect(page.locator('#agent-intent')).toHaveValue('add brighter chords');
+  await expect(page.locator('#agent-user-message')).toBeHidden();
+});
+
+test('a new Agent turn archives the previous result and diff in the scrolling transcript', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#agent-intent').fill('tighten the drums');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+  await expect(page.locator('#status')).toContainText('staged. Review it');
+  await expect(page.locator('#agent-diff')).toContainText('Agent draft: tighten the drums');
+  await expect(page.locator('#agent-activity')).not.toHaveAttribute('open', '');
+  await expect(page.locator('#agent-activity-summary')).toHaveText('Worked for');
+  await expect(page.locator('#agent-activity-elapsed')).toHaveText(/\d+(?:m \d+)?s/);
+  expect(await page.locator('#agent-activity').evaluate((activity) => {
+    const result = document.querySelector('#agent-result');
+    return activity.getBoundingClientRect().bottom <= result.getBoundingClientRect().top;
+  })).toBe(true);
+
+  await page.locator('#agent-intent').fill('brighten the chords');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  const archivedTurn = page.locator('#agent-turn-history .agent-turn-archived');
+  await expect(archivedTurn).toHaveCount(1);
+  await expect(archivedTurn).toContainText('tighten the drums');
+  await expect(archivedTurn).toContainText('Agent draft: tighten the drums');
+  await expect(page.locator('#agent-user-message')).toHaveText('brighten the chords');
+  await expect(page.locator('#agent-diff')).toContainText('Agent draft: brighten the chords');
 });
 
 test('agent can create the first track from an empty editor', async ({ page }) => {
@@ -412,9 +462,80 @@ test('agent activity timeline shows live model progress and safe tool names', as
   await expect(page.locator('#agent-activity-list')).toContainText('Revising change');
   await expect(page.locator('#agent-activity-list')).not.toContainText('candidateCode');
   await expect(page.locator('#agent-activity-list')).not.toContainText('PRIVATE reasoning');
+  await expect(page.locator('#agent-activity')).toHaveAttribute('open', '');
 
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.locator('#agent-activity-summary')).toContainText('Cancelled');
+  await expect(page.locator('#agent-activity-summary')).toHaveText('Cancelled after');
+  await expect(page.locator('#agent-activity')).not.toHaveAttribute('open', '');
+});
+
+test('a running Agent Run recovers a missed terminal event by polling', async ({ page }) => {
+  const startedAt = Math.floor(Date.now() / 1000);
+  const runningRun = {
+    id: 'poll-run',
+    status: 'running',
+    question: null,
+    finalChange: null,
+    error: null,
+    activities: [{
+      sequence: 1,
+      kind: 'model_turn',
+      status: 'running',
+      startedAt,
+      completedAt: null,
+      turn: 1,
+      tool: null,
+      message: null,
+    }],
+  };
+  const finalCode = 's("bd*4")';
+  const completedRun = {
+    ...runningRun,
+    status: 'completed',
+    finalChange: {
+      code: finalCode,
+      explanation: 'Added a four-on-the-floor kick.',
+      action: 'apply',
+      warnings: [],
+    },
+    activities: [{ ...runningRun.activities[0], status: 'completed', completedAt: startedAt + 1 }],
+  };
+  const stagedChange = {
+    id: 'poll-change', projectId: 'local-project', sessionId: 'local-session', createdAt: 1,
+    intent: 'add a steady kick', applyMode: 'manual', preAgentCode: 's("bd")', code: finalCode,
+    explanation: completedRun.finalChange.explanation, action: 'apply', provider: 'mock', model: null,
+    latencyMs: 1, warnings: [], undoneAt: null,
+  };
+  let runReads = 0;
+  await page.route('**/agent/runs**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path === '/agent/runs') {
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(runningRun) });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/agent/runs/poll-run') {
+      runReads += 1;
+      const body = runReads === 1 ? runningRun : completedRun;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/agent/runs/poll-run/stage') {
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(stagedChange) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await page.getByTestId('mock-editor').fill('s("bd")');
+  await page.locator('#agent-intent').fill('add a steady kick');
+  await page.getByRole('button', { name: 'Stage change' }).click();
+
+  await expect(page.getByTestId('mock-editor')).toHaveValue(finalCode);
+  await expect(page.locator('#status')).toContainText('staged. Review it');
+  await expect.poll(() => runReads).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
 });
 
 test('editor updates reach an active Agent Run in accepted-hash order', async ({ page }) => {
@@ -609,6 +730,7 @@ test('a paused Agent Run exposes only its clarification question and options', a
   await page.getByRole('button', { name: 'Stage change' }).click();
 
   await expect(page.locator('#agent-question')).toBeVisible();
+  await expect(page.locator('#agent-user-message')).toHaveText('make the drums more energetic');
   await expect(page.locator('#agent-question-text')).toHaveText('Keep the current tempo?');
   await expect(page.locator('#agent-question-options')).toContainText('Keep it');
   await expect(page.locator('#agent-question-options')).toContainText('Stay at 124 BPM.');
@@ -764,6 +886,7 @@ test('a browser reload restores a paused Agent Run without storing credentials',
 
   await page.goto('/');
   await expect(page.locator('#agent-question')).toBeVisible();
+  await expect(page.locator('#agent-user-message')).toHaveText(storedRun.intent);
   await page.reload();
   await expect(page.locator('#agent-question')).toBeVisible();
   await expect(page.locator('#agent-activity-list')).toContainText('Preparing a clarification');

@@ -45,8 +45,10 @@ let snapshotsCache: SnapshotRecord[] = [];
 let activeAgentRun: ActiveAgentRun | null = null;
 let startingAgentRun = false;
 let agentRunUpdateQueue = Promise.resolve();
+let agentRunPollTimer: number | null = null;
 
 const EDITOR_UPDATE_DEBOUNCE_MS = 300;
+const AGENT_RUN_STALE_POLL_MS = 1_500;
 
 interface ActiveAgentRun {
   id: string;
@@ -68,6 +70,10 @@ const panicButton = requireElement<HTMLButtonElement>('#panic');
 const statusElement = requireElement<HTMLElement>('#status');
 const sampleListElement = requireElement<HTMLElement>('#sample-list');
 const snapshotListElement = requireElement<HTMLElement>('#snapshot-list');
+const snapshotDialog = requireElement<HTMLDialogElement>('#snapshots-dialog');
+const openSnapshotsButton = requireElement<HTMLButtonElement>('#open-snapshots');
+const closeSnapshotsButton = requireElement<HTMLButtonElement>('#close-snapshots');
+const snapshotCountElement = requireElement<HTMLElement>('#snapshot-count');
 const agentPanel = new AgentPanel(
   requireElement<HTMLFormElement>('#agent-form'),
   requireElement<HTMLTextAreaElement>('#agent-intent'),
@@ -75,9 +81,15 @@ const agentPanel = new AgentPanel(
   requireElement<HTMLButtonElement>('#stage-change'),
   requireElement<HTMLButtonElement>('#cancel-change'),
   requireElement<HTMLButtonElement>('#undo-change'),
+  requireElement<HTMLElement>('#agent-transcript'),
+  requireElement<HTMLElement>('#agent-turn-history'),
+  requireElement<HTMLElement>('#agent-current-turn'),
+  requireElement<HTMLElement>('#agent-user-message'),
+  requireElement<HTMLElement>('#agent-result'),
   requireElement<HTMLElement>('#agent-explanation'),
   requireElement<HTMLElement>('#agent-warnings'),
-  requireElement<HTMLElement>('#agent-activity'),
+  requireElement<HTMLElement>('#agent-diff'),
+  requireElement<HTMLDetailsElement>('#agent-activity'),
   requireElement<HTMLElement>('#agent-activity-summary'),
   requireElement<HTMLTimeElement>('#agent-activity-elapsed'),
   requireElement<HTMLOListElement>('#agent-activity-list'),
@@ -141,10 +153,12 @@ async function restoreActiveAgentRun(): Promise<void> {
     editorUpdateTask: null,
     pendingEditorVersion: null,
   };
+  agentPanel.showSubmission(stored.intent);
   try {
     enqueueAgentRunUpdate(await fetchAgentRun(stored.id));
   } catch {
     activeAgentRun = null;
+    stopAgentRunPolling();
     clearActiveAgentRun(sessionStorage);
     status.set('Previous Agent Run is no longer available after reload.', 'warn');
   }
@@ -246,12 +260,14 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
       editorUpdateTask: null,
       pendingEditorVersion: null,
     };
+    agentPanel.acceptSubmission(value.intent);
     persistActiveAgentRun();
     scheduleActiveRunEditorUpdate();
     enqueueAgentRunUpdate(run);
     void refreshAgentRun(run.id);
   } catch (error) {
     activeAgentRun = null;
+    stopAgentRunPolling();
     clearActiveAgentRun(sessionStorage);
     agentPanel.setBusy(false);
     agentPanel.clearActivity();
@@ -261,26 +277,52 @@ async function stageAgentChange(value: { intent: string; applyMode: 'manual' | '
   }
 }
 
-function enqueueAgentRunUpdate(run: AgentRunPublic): void {
+function enqueueAgentRunUpdate(run: AgentRunPublic): Promise<void> {
   agentRunUpdateQueue = agentRunUpdateQueue
     .then(() => applyAgentRunUpdate(run))
     .catch((error) => {
       if (activeAgentRun?.id === run.id) {
         activeAgentRun = null;
+        stopAgentRunPolling();
         clearActiveAgentRun(sessionStorage);
         agentPanel.setBusy(false);
       }
       status.set(error instanceof Error ? error.message : String(error), 'error');
     });
+  return agentRunUpdateQueue;
 }
 
 async function refreshAgentRun(runId: string): Promise<void> {
   try {
-    enqueueAgentRunUpdate(await fetchAgentRun(runId));
+    await enqueueAgentRunUpdate(await fetchAgentRun(runId));
   } catch (error) {
     if (activeAgentRun?.id === runId) {
       status.set(error instanceof Error ? error.message : String(error), 'error');
     }
+  }
+}
+
+function scheduleAgentRunPoll(runId: string): void {
+  if (activeAgentRun?.id !== runId) return;
+  stopAgentRunPolling();
+  agentRunPollTimer = window.setTimeout(() => {
+    agentRunPollTimer = null;
+    void pollActiveAgentRun(runId);
+  }, AGENT_RUN_STALE_POLL_MS);
+}
+
+function stopAgentRunPolling(): void {
+  if (agentRunPollTimer === null) return;
+  window.clearTimeout(agentRunPollTimer);
+  agentRunPollTimer = null;
+}
+
+async function pollActiveAgentRun(runId: string): Promise<void> {
+  if (activeAgentRun?.id !== runId) return;
+  try {
+    await enqueueAgentRunUpdate(await fetchAgentRun(runId));
+  } catch {
+    if (activeAgentRun?.id === runId) scheduleAgentRunPoll(runId);
   }
 }
 
@@ -290,6 +332,7 @@ async function applyAgentRunUpdate(run: AgentRunPublic): Promise<void> {
   agentPanel.showActivity(run);
 
   if (run.status === 'running') {
+    scheduleAgentRunPoll(run.id);
     agentPanel.clearQuestion();
     agentPanel.setBusy(true);
     status.set('Agent is working...', 'warn');
@@ -297,6 +340,7 @@ async function applyAgentRunUpdate(run: AgentRunPublic): Promise<void> {
   }
 
   if (run.status === 'needs_input') {
+    stopAgentRunPolling();
     agentPanel.setBusy(true);
     if (run.question) agentPanel.showQuestion(run.question);
     status.set('Agent needs a clarification before it can continue.', 'warn');
@@ -359,9 +403,9 @@ async function stageCompletedAgentRun(activeRun: ActiveAgentRun, run: AgentRunPu
     applyingRemoteCode = false;
   }
   state.stageChange(stagedChange);
+  diffView.render(stagedChange.preAgentCode, stagedChange.code);
   agentPanel.showChange(stagedChange);
   agentPanel.setUndoAvailable(false);
-  diffView.render(stagedChange.preAgentCode, stagedChange.code);
   try {
     const stagedEditorVersion = await captureEditorVersion();
     const persistedChange = await acknowledgeAgentRunStage(run.id, {
@@ -433,6 +477,7 @@ async function fireStagedChangeIfReady(
 
 function finishAgentRun(runId: string): void {
   if (activeAgentRun?.id !== runId) return;
+  stopAgentRunPolling();
   if (activeAgentRun.editorUpdateTimer !== null) {
     window.clearTimeout(activeAgentRun.editorUpdateTimer);
   }
@@ -600,9 +645,9 @@ async function revertToLastGood(): Promise<void> {
   }
 }
 
-async function revertToSnapshot(snapshotId: string): Promise<void> {
+async function revertToSnapshot(snapshotId: string): Promise<boolean> {
   if (!repl || !state) {
-    return;
+    return false;
   }
 
   try {
@@ -617,15 +662,19 @@ async function revertToSnapshot(snapshotId: string): Promise<void> {
 
     await repl.evaluate();
     status.set('Reverted to snapshot.', 'ok');
+    return true;
   } catch (error) {
     applyingRemoteCode = false;
     status.set(error instanceof Error ? error.message : String(error), 'error');
+    return false;
   }
 }
 
 function renderSnapshots(): void {
-  snapshotList.render(snapshotsCache, (snapshotId) => {
-    revertToSnapshot(snapshotId);
+  snapshotCountElement.textContent = String(snapshotsCache.length);
+  openSnapshotsButton.setAttribute('aria-label', `Open snapshots (${snapshotsCache.length})`);
+  snapshotList.render(snapshotsCache, async (snapshotId) => {
+    if (await revertToSnapshot(snapshotId)) snapshotDialog.close();
   });
 }
 
@@ -749,6 +798,18 @@ stopButton.addEventListener('click', () => {
 
 panicButton.addEventListener('click', () => {
   panic();
+});
+
+openSnapshotsButton.addEventListener('click', () => {
+  snapshotDialog.showModal();
+});
+
+closeSnapshotsButton.addEventListener('click', () => {
+  snapshotDialog.close();
+});
+
+snapshotDialog.addEventListener('click', (event) => {
+  if (event.target === snapshotDialog) snapshotDialog.close();
 });
 
 agentPanel.onSubmit((value) => { stageAgentChange(value); });

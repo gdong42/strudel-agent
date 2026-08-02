@@ -45,7 +45,7 @@ export function getSnapshotLabel(code: string, stagedChange: StagedAgentChange |
 export class SnapshotListView {
   constructor(private readonly element: HTMLElement) {}
 
-  render(snapshots: SnapshotRecord[], onRevert: (snapshotId: string) => void): void {
+  render(snapshots: SnapshotRecord[], onRevert: (snapshotId: string) => void | Promise<void>): void {
     this.element.replaceChildren();
 
     if (snapshots.length === 0) {
@@ -116,7 +116,7 @@ export class SnapshotListView {
     button.type = 'button';
     button.textContent = 'Revert';
     button.title = `Revert to ${createdAt.toLocaleString()}`;
-    button.addEventListener('click', () => onRevert(snapshot.id));
+    button.addEventListener('click', () => { void onRevert(snapshot.id); });
 
     item.append(meta, button);
     return item;

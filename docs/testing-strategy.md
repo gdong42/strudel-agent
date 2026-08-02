@@ -226,7 +226,7 @@ It should also dispatch the same `update` event expected by the app.
 | 13 | Cancelled Run | Editor, playback, snapshot, and change history remain unchanged |
 | 14 | Completed Manual Fire run | One final change is staged with final diff/explanation; no evaluate call |
 | 15 | Completed Auto Fire run passes gates | Final change evaluates once; failed gates return to the agent or block completion |
-| 16 | Agent Run is active, streams commentary, then reconnects | Timeline shows elapsed/turn/commentary/tool progress without private payloads and restores the bounded activity history after reconnect |
+| 16 | Agent Run is active, streams commentary, then reconnects or misses a terminal event | Timeline shows elapsed/turn/commentary/tool progress without private payloads and restores or polls the bounded activity state |
 
 ### 5.4 Real REPL smoke tests
 
