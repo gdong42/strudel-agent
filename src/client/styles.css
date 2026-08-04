@@ -75,7 +75,7 @@ button:disabled {
 
 main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1.618fr) minmax(360px, 1fr);
   min-height: 0;
   min-width: 0;
 }

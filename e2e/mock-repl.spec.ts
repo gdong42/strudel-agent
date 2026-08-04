@@ -87,6 +87,23 @@ test('evaluate success saves track and creates snapshot', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(1);
 });
 
+test('desktop workspace uses a golden-ratio split', async ({ page }) => {
+  await page.goto('/');
+
+  const widths = await page.locator('main').evaluate((main) => {
+    const editor = main.querySelector('#repl-host');
+    const panel = main.querySelector('.side-panel');
+    return {
+      editor: editor?.getBoundingClientRect().width ?? 0,
+      panel: panel?.getBoundingClientRect().width ?? 0,
+    };
+  });
+
+  expect(widths.editor / widths.panel).toBeGreaterThan(1.6);
+  expect(widths.editor / widths.panel).toBeLessThan(1.64);
+  expect(widths.panel).toBeGreaterThanOrEqual(360);
+});
+
 test('evaluate failure does not save track or snapshot', async ({ page }) => {
   const trackRequests: string[] = [];
   const snapshotRequests: string[] = [];
