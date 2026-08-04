@@ -214,10 +214,13 @@ class ToolResult(BaseModel):
 
 
 class AgentMessage(BaseModel):
+    """Private normalized model message. Never serialize it to browser clients."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     role: AgentMessageRole
     content: str = ""
+    reasoning_content: str | None = Field(default=None, alias="reasoningContent")
     tool_calls: list[ToolCall] = Field(default_factory=list, alias="toolCalls")
     tool_call_id: str | None = Field(default=None, alias="toolCallId")
 
@@ -229,6 +232,8 @@ class AgentMessage(BaseModel):
             raise ValueError("Only tool messages may include toolCallId")
         if self.role != "assistant" and self.tool_calls:
             raise ValueError("Only assistant messages may include toolCalls")
+        if self.role != "assistant" and self.reasoning_content is not None:
+            raise ValueError("Only assistant messages may include reasoningContent")
         return self
 
 

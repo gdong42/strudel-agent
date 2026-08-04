@@ -205,10 +205,11 @@ Providers may additionally implement `next_turn_stream(request,
 on_commentary)`. This extension still resolves to one complete
 `ModelTurnResult`; the callback receives throttled cumulative snapshots only
 from the provider's public assistant-content channel. OpenAI Responses adapters
-consume `response.output_text.delta`, while DeepSeek Chat Completions adapters
-consume `delta.content`. Reasoning events/content and streamed function
+consume `response.output_text.delta`, while DeepSeek and Kimi Chat Completions
+adapters consume `delta.content`. Reasoning events/content and streamed function
 arguments are ignored by the callback and remain private inputs to final turn
-reconstruction.
+reconstruction. Kimi's preserved thinking history is retained only on internal
+assistant messages and never enters the public Run projection.
 
 `ModelTurnResult` contains normalized assistant content, tool calls, usage, and
 provider metadata. The runtime, not the adapter, decides whether to execute a
@@ -231,6 +232,9 @@ Current providers remain direct API integrations:
 - OpenAI uses the Responses API and `gpt-5.6-terra` by default.
 - DeepSeek uses Chat Completions and `deepseek-v4-flash` as the checked-in
   project default.
+- Kimi uses the Moonshot China Chat Completions endpoint and `kimi-k3` by
+  default. K3 reasoning is fixed to `high` initially, and the adapter preserves
+  `reasoning_content` across tool turns as required by the model protocol.
 - Mock remains deterministic for runtime and UI tests.
 
 Each adapter will normalize its vendor's native tool-call representation into
@@ -632,6 +636,7 @@ GET  /samples                    List declared project samples (not live load st
 │   │       ├── http.py
 │   │       ├── openai.py
 │   │       ├── deepseek.py
+│   │       ├── kimi.py
 │   │       └── mock.py
 │   └── tests/
 ├── src/
@@ -698,10 +703,11 @@ GET  /samples                    List declared project samples (not live load st
 
 The config file supplies backend defaults. The settings UI can override provider,
 model, and runtime limits in the current browser. Runtime overrides are stored as
-separate profiles keyed by effective provider and model. API keys are stored only
-in browser storage and sent to the backend for the duration of an individual
-request; the backend must not persist or return them. A hosted deployment may use
-platform credentials when the browser does not supply a user key.
+separate profiles keyed by effective provider and model. API keys are isolated by
+provider, stored only in the selected browser storage, and sent to the backend
+for the duration of an individual request; the backend must not persist or
+return them. A hosted deployment may use platform credentials when the browser
+does not supply a user key.
 
 `agent.contextFile` is only a project-relative file locator. Musical conventions
 live in that Markdown file, while `project.config.json` retains machine and

@@ -4,6 +4,7 @@ from .config import load_config
 from .models import AgentRunBudget, ProviderInfo
 from .providers.base import AgentProvider
 from .providers.deepseek import DEFAULT_DEEPSEEK_MODEL, DeepSeekProvider
+from .providers.kimi import DEFAULT_KIMI_MODEL, KimiProvider
 from .providers.mock import MockProvider
 from .providers.openai import DEFAULT_OPENAI_MODEL, OpenAIProvider
 
@@ -44,6 +45,12 @@ def create_agent_service(
         configured_model = config.model if selected == config.provider.lower() else None
         selected_model = model or configured_model or DEFAULT_DEEPSEEK_MODEL
         return AgentService(DeepSeekProvider(api_key, selected_model), "deepseek", selected_model)
+    if selected == "kimi":
+        if not api_key:
+            raise AgentConfigurationError("Kimi API key is not configured")
+        configured_model = config.model if selected == config.provider.lower() else None
+        selected_model = model or configured_model or DEFAULT_KIMI_MODEL
+        return AgentService(KimiProvider(api_key, selected_model), "kimi", selected_model)
     raise AgentConfigurationError(f'Unknown agent provider: "{selected}"')
 
 
@@ -68,5 +75,15 @@ def list_provider_info(default_runtime: AgentRunBudget) -> list[ProviderInfo]:
             requiresApiKey=True,
             defaultModel=DEFAULT_OPENAI_MODEL,
             defaultRuntime=default_runtime.model_copy(deep=True),
+        ),
+        ProviderInfo(
+            id="kimi",
+            label="Kimi",
+            requiresApiKey=True,
+            defaultModel=DEFAULT_KIMI_MODEL,
+            defaultRuntime=default_runtime.model_copy(
+                deep=True,
+                update={"max_output_tokens_per_turn": 131_072},
+            ),
         ),
     ]

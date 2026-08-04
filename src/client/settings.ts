@@ -6,29 +6,28 @@ import {
   type AgentSettingsPayload,
 } from './bridge';
 
-const SETTINGS_KEY = 'strudel-agent.settings.v1';
-const LOCAL_API_KEY = 'strudel-agent.api-key.v1';
-const SESSION_API_KEY = 'strudel-agent.session-api-key.v1';
+const SETTINGS_KEY = 'strudel-agent.settings.v2';
+const API_KEY_PREFIX = 'strudel-agent.api-key.v2.';
 const DEFAULT_TOTAL_TOKEN_INPUT = 4_000_000;
 
 export type AgentRuntimeProfiles = Record<string, AgentRuntimeLimits>;
+export type AgentApiKeys = Record<string, string>;
+export type AgentApiKeyPersistence = Record<string, boolean>;
 
 interface StoredSettings {
   provider: string | null;
   model: string | null;
-  rememberApiKey: boolean;
+  rememberApiKeys: AgentApiKeyPersistence;
   runtimeProfiles: AgentRuntimeProfiles;
 }
 
 interface ConnectionFormSettings {
   provider: string | null;
   model: string | null;
-  apiKey: string | null;
-  rememberApiKey: boolean;
 }
 
 export interface BrowserAgentSettings extends StoredSettings {
-  apiKey: string | null;
+  apiKeys: AgentApiKeys;
 }
 
 export function resolveAgentModelDefault(backend: AgentSettingsPayload, provider: string): string | null {
@@ -67,8 +66,12 @@ export function loadBrowserAgentSettings(local: Storage, session: Storage): Brow
   } catch {
     // Corrupt browser settings fall back to backend defaults.
   }
-  const apiKey = stored.rememberApiKey ? local.getItem(LOCAL_API_KEY) : session.getItem(SESSION_API_KEY);
-  return { ...stored, apiKey };
+  const apiKeys: AgentApiKeys = {};
+  for (const [provider, remembered] of Object.entries(stored.rememberApiKeys)) {
+    const value = (remembered ? local : session).getItem(apiKeyStorageKey(provider));
+    if (value) apiKeys[provider] = value;
+  }
+  return { ...stored, apiKeys };
 }
 
 export function saveBrowserAgentSettings(
@@ -76,26 +79,38 @@ export function saveBrowserAgentSettings(
   local: Storage,
   session: Storage,
 ): void {
+  const previous = loadStoredSettings(local);
+  const providers = new Set([
+    ...Object.keys(previous.rememberApiKeys),
+    ...Object.keys(settings.rememberApiKeys),
+    ...Object.keys(settings.apiKeys),
+  ]);
+  for (const provider of providers) {
+    local.removeItem(apiKeyStorageKey(provider));
+    session.removeItem(apiKeyStorageKey(provider));
+  }
   local.setItem(SETTINGS_KEY, JSON.stringify({
     provider: settings.provider,
     model: settings.model,
-    rememberApiKey: settings.rememberApiKey,
+    rememberApiKeys: settings.rememberApiKeys,
     runtimeProfiles: settings.runtimeProfiles,
   } satisfies StoredSettings));
-  local.removeItem(LOCAL_API_KEY);
-  session.removeItem(SESSION_API_KEY);
-  if (!settings.apiKey) return;
-  (settings.rememberApiKey ? local : session).setItem(
-    settings.rememberApiKey ? LOCAL_API_KEY : SESSION_API_KEY,
-    settings.apiKey,
-  );
+  for (const [provider, apiKey] of Object.entries(settings.apiKeys)) {
+    if (!apiKey) continue;
+    const remembered = settings.rememberApiKeys[provider] === true;
+    (remembered ? local : session).setItem(apiKeyStorageKey(provider), apiKey);
+  }
 }
 
 export class SettingsPanel {
   private backend: AgentSettingsPayload | null = null;
   private settings = loadBrowserAgentSettings(localStorage, sessionStorage);
   private runtimeDrafts: AgentRuntimeProfiles = {};
+  private apiKeyDrafts: AgentApiKeys = {};
+  private rememberApiKeyDrafts: AgentApiKeyPersistence = {};
+  private modelDrafts: Record<string, string> = {};
   private activeRuntimeKey: string | null = null;
+  private activeProvider: string | null = null;
   private runtimeUsesDefault = true;
 
   constructor(
@@ -120,8 +135,8 @@ export class SettingsPanel {
   ) {
     openButton.addEventListener('click', () => this.open());
     closeButton.addEventListener('click', () => dialog.close());
-    provider.addEventListener('change', () => this.changeRuntimeSelection());
-    model.addEventListener('change', () => this.changeRuntimeSelection());
+    provider.addEventListener('change', () => this.changeProviderSelection());
+    model.addEventListener('change', () => this.changeModelSelection());
     apiKey.addEventListener('input', () => this.syncKeyState());
     for (const input of [maxTurns, maxElapsedSeconds, maxTotalTokens, maxOutputTokensPerTurn]) {
       input.addEventListener('input', () => { this.runtimeUsesDefault = false; });
@@ -151,7 +166,7 @@ export class SettingsPanel {
     return {
       provider: this.settings.provider,
       model: this.settings.model,
-      apiKey: this.providerRequiresKey(provider) ? this.settings.apiKey : null,
+      apiKey: provider && this.providerRequiresKey(provider) ? this.settings.apiKeys[provider] ?? null : null,
     };
   }
 
@@ -168,12 +183,17 @@ export class SettingsPanel {
 
   private open(): void {
     this.provider.value = this.settings.provider ?? '';
-    this.model.value = this.settings.model ?? '';
-    this.apiKey.value = this.settings.apiKey ?? '';
-    this.remember.checked = this.settings.rememberApiKey;
     this.runtimeDrafts = cloneRuntimeProfiles(this.settings.runtimeProfiles);
+    this.apiKeyDrafts = { ...this.settings.apiKeys };
+    this.rememberApiKeyDrafts = { ...this.settings.rememberApiKeys };
+    this.modelDrafts = {};
+    const provider = this.currentProvider();
+    if (this.settings.model) this.modelDrafts[provider] = this.settings.model;
+    this.activeProvider = provider;
+    this.model.value = this.modelDrafts[provider] ?? '';
     this.activeRuntimeKey = null;
     this.message.textContent = '';
+    this.loadCredentialFields();
     this.syncKeyState();
     this.loadRuntimeFields();
     this.dialog.showModal();
@@ -181,8 +201,11 @@ export class SettingsPanel {
 
   private save(): void {
     this.stashRuntimeDraft();
+    this.stashProviderDrafts();
     this.settings = {
       ...this.readConnectionForm(),
+      apiKeys: { ...this.apiKeyDrafts },
+      rememberApiKeys: { ...this.rememberApiKeyDrafts },
       runtimeProfiles: cloneRuntimeProfiles(this.runtimeDrafts),
     };
     saveBrowserAgentSettings(this.settings, localStorage, sessionStorage);
@@ -198,7 +221,7 @@ export class SettingsPanel {
       const result = await testAgentProvider({
         provider: formSettings.provider,
         model: formSettings.model,
-        apiKey: this.providerRequiresKey(provider) ? formSettings.apiKey : null,
+        apiKey: this.providerRequiresKey(provider) ? this.apiKey.value.trim() || null : null,
       });
       this.message.textContent = result.message;
     } catch (error) {
@@ -209,18 +232,24 @@ export class SettingsPanel {
   }
 
   private clearKey(): void {
+    const provider = this.currentProvider();
     this.apiKey.value = '';
-    this.settings = { ...this.settings, apiKey: null };
+    delete this.apiKeyDrafts[provider];
+    delete this.rememberApiKeyDrafts[provider];
+    const apiKeys = { ...this.settings.apiKeys };
+    const rememberApiKeys = { ...this.settings.rememberApiKeys };
+    delete apiKeys[provider];
+    delete rememberApiKeys[provider];
+    this.settings = { ...this.settings, apiKeys, rememberApiKeys };
     saveBrowserAgentSettings(this.settings, localStorage, sessionStorage);
     this.message.textContent = 'API key cleared from this browser.';
+    this.syncKeyState();
   }
 
   private readConnectionForm(): ConnectionFormSettings {
     return {
       provider: this.provider.value || null,
       model: this.model.value.trim() || null,
-      apiKey: this.apiKey.value.trim() || null,
-      rememberApiKey: this.remember.checked,
     };
   }
 
@@ -247,10 +276,35 @@ export class SettingsPanel {
     this.provider.replaceChildren(defaultOption, ...options);
   }
 
-  private changeRuntimeSelection(): void {
+  private changeProviderSelection(): void {
     this.stashRuntimeDraft();
+    this.stashProviderDrafts();
+    this.activeProvider = this.currentProvider();
+    this.model.value = this.modelDrafts[this.activeProvider] ?? '';
+    this.loadCredentialFields();
     this.syncKeyState();
     this.loadRuntimeFields();
+  }
+
+  private changeModelSelection(): void {
+    this.stashRuntimeDraft();
+    if (this.activeProvider) this.modelDrafts[this.activeProvider] = this.model.value.trim();
+    this.loadRuntimeFields();
+  }
+
+  private stashProviderDrafts(): void {
+    if (!this.activeProvider) return;
+    const apiKey = this.apiKey.value.trim();
+    if (apiKey) this.apiKeyDrafts[this.activeProvider] = apiKey;
+    else delete this.apiKeyDrafts[this.activeProvider];
+    this.rememberApiKeyDrafts[this.activeProvider] = this.remember.checked;
+    this.modelDrafts[this.activeProvider] = this.model.value.trim();
+  }
+
+  private loadCredentialFields(): void {
+    if (!this.activeProvider) return;
+    this.apiKey.value = this.apiKeyDrafts[this.activeProvider] ?? '';
+    this.remember.checked = this.rememberApiKeyDrafts[this.activeProvider] === true;
   }
 
   private loadRuntimeFields(): void {
@@ -299,6 +353,11 @@ export class SettingsPanel {
     return { provider, model };
   }
 
+  private currentProvider(): string {
+    if (!this.backend) throw new Error('Agent settings are not loaded');
+    return this.provider.value || this.backend.defaultProvider;
+  }
+
   private syncTotalTokenState(): void {
     this.maxTotalTokens.disabled = this.unlimitedTotalTokens.checked;
   }
@@ -310,7 +369,7 @@ export class SettingsPanel {
     const defaultModel = this.providerDefaultModel(selected);
     this.apiKey.disabled = !requiresKey;
     this.remember.disabled = !requiresKey;
-    this.clearKeyButton.disabled = !this.settings.apiKey && !this.apiKey.value;
+    this.clearKeyButton.disabled = !this.apiKey.value;
     this.model.placeholder = defaultModel ? `Default: ${defaultModel}` : 'Use provider default';
   }
 
@@ -333,7 +392,7 @@ export class SettingsPanel {
 }
 
 function defaultStoredSettings(): StoredSettings {
-  return { provider: null, model: null, rememberApiKey: false, runtimeProfiles: {} };
+  return { provider: null, model: null, rememberApiKeys: {}, runtimeProfiles: {} };
 }
 
 function normalizeStoredSettings(value: unknown): StoredSettings {
@@ -342,9 +401,29 @@ function normalizeStoredSettings(value: unknown): StoredSettings {
   return {
     provider: typeof candidate.provider === 'string' ? candidate.provider : null,
     model: typeof candidate.model === 'string' ? candidate.model : null,
-    rememberApiKey: candidate.rememberApiKey === true,
+    rememberApiKeys: normalizeApiKeyPersistence(candidate.rememberApiKeys),
     runtimeProfiles: normalizeRuntimeProfiles(candidate.runtimeProfiles),
   };
+}
+
+function loadStoredSettings(local: Storage): StoredSettings {
+  try {
+    const raw = local.getItem(SETTINGS_KEY);
+    return raw ? normalizeStoredSettings(JSON.parse(raw)) : defaultStoredSettings();
+  } catch {
+    return defaultStoredSettings();
+  }
+}
+
+function normalizeApiKeyPersistence(value: unknown): AgentApiKeyPersistence {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([provider, remembered]) => provider.length > 0 && typeof remembered === 'boolean'),
+  );
+}
+
+function apiKeyStorageKey(provider: string): string {
+  return `${API_KEY_PREFIX}${encodeURIComponent(provider)}`;
 }
 
 function normalizeRuntimeProfiles(value: unknown): AgentRuntimeProfiles {

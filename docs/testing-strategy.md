@@ -130,10 +130,11 @@ results, not assert a model's private reasoning.
 | 9 | A Run contributes session conversation data | Only intent, public clarification, final explanation, and safe outcome enter bounded revision context; code, tools, credentials, and hidden reasoning do not |
 | 10 | A Run or Change lifecycle event is persisted | Audit links IDs and safe outcome metadata while excluding raw input, code, credentials, provider payloads, and hidden reasoning |
 | 11 | A model turn streams commentary and calls tools | Public activity reports bounded commentary and fixed model/tool metadata while excluding candidate code, reasoning, tool arguments/results, and raw provider payloads |
-| 12 | OpenAI or DeepSeek returns streamed text, reasoning, and tool-call deltas | Only public content reaches the commentary callback; the complete normalized tool turn is reconstructed privately |
-| 13 | Model calls `lookup_strudel_docs` with an exact function symbol | The pinned local result and examples enter private tool history; only a fixed tool-activity label is public |
-| 14 | Candidate has invalid JavaScript or Mini Notation | Parser error category and line/column enter private tool history; finalization is rejected and the Agent revises internally |
-| 15 | Static validator process cannot start, times out, or returns malformed output | Validation fails closed without exposing process details or staging unchecked code |
+| 12 | OpenAI, DeepSeek, or Kimi returns streamed text, reasoning, and tool-call deltas | Only public content reaches the commentary callback; the complete normalized tool turn is reconstructed privately, including Kimi preserved thinking history |
+| 13 | Browser switches between API-key providers | Each provider loads only its own session or persistent key; no credential is copied to another provider |
+| 14 | Model calls `lookup_strudel_docs` with an exact function symbol | The pinned local result and examples enter private tool history; only a fixed tool-activity label is public |
+| 15 | Candidate has invalid JavaScript or Mini Notation | Parser error category and line/column enter private tool history; finalization is rejected and the Agent revises internally |
+| 16 | Static validator process cannot start, times out, or returns malformed output | Validation fails closed without exposing process details or staging unchecked code |
 
 ---
 

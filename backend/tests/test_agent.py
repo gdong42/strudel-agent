@@ -115,6 +115,18 @@ def test_deepseek_requires_an_api_key() -> None:
         create_agent_service("deepseek")
 
 
+def test_kimi_requires_an_api_key() -> None:
+    with pytest.raises(AgentConfigurationError, match="Kimi API key"):
+        create_agent_service("kimi")
+
+
+def test_kimi_uses_its_default_model() -> None:
+    service = create_agent_service("kimi", api_key="test-key")
+
+    assert service.provider_name == "kimi"
+    assert service.model == "kimi-k3"
+
+
 def test_openai_uses_configured_default_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.agent.load_config",

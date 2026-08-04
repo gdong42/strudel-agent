@@ -23,7 +23,8 @@ describe('browser agent settings', () => {
 
     saveBrowserAgentSettings(
       {
-        provider: 'openai', model: 'test-model', apiKey: 'secret', rememberApiKey: false,
+        provider: 'openai', model: 'test-model', apiKeys: { openai: 'secret' },
+        rememberApiKeys: { openai: false },
         runtimeProfiles: {},
       },
       local,
@@ -32,7 +33,8 @@ describe('browser agent settings', () => {
 
     expect(JSON.stringify(storageValues(local))).not.toContain('secret');
     expect(loadBrowserAgentSettings(local, session)).toEqual({
-      provider: 'openai', model: 'test-model', apiKey: 'secret', rememberApiKey: false,
+      provider: 'openai', model: 'test-model', apiKeys: { openai: 'secret' },
+      rememberApiKeys: { openai: false },
       runtimeProfiles: {},
     });
   });
@@ -43,7 +45,8 @@ describe('browser agent settings', () => {
 
     saveBrowserAgentSettings(
       {
-        provider: 'openai', model: null, apiKey: 'persistent-secret', rememberApiKey: true,
+        provider: 'openai', model: null, apiKeys: { openai: 'persistent-secret' },
+        rememberApiKeys: { openai: true },
         runtimeProfiles: {},
       },
       local,
@@ -51,7 +54,30 @@ describe('browser agent settings', () => {
     );
 
     expect(JSON.stringify(storageValues(session))).not.toContain('persistent-secret');
-    expect(loadBrowserAgentSettings(local, session).apiKey).toBe('persistent-secret');
+    expect(loadBrowserAgentSettings(local, session).apiKeys.openai).toBe('persistent-secret');
+  });
+
+  it('keeps API keys isolated by provider and persistence choice', () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+
+    saveBrowserAgentSettings(
+      {
+        provider: 'kimi', model: null,
+        apiKeys: { deepseek: 'deepseek-secret', kimi: 'kimi-secret' },
+        rememberApiKeys: { deepseek: true, kimi: false },
+        runtimeProfiles: {},
+      },
+      local,
+      session,
+    );
+
+    expect(loadBrowserAgentSettings(local, session).apiKeys).toEqual({
+      deepseek: 'deepseek-secret',
+      kimi: 'kimi-secret',
+    });
+    expect(JSON.stringify(storageValues(local))).not.toContain('kimi-secret');
+    expect(JSON.stringify(storageValues(session))).not.toContain('deepseek-secret');
   });
 
   it('uses the project model when the selected provider matches the backend default', () => {

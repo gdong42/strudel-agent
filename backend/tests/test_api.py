@@ -174,6 +174,13 @@ def test_agent_settings_exposes_defaults_without_secrets(project_paths: dict[str
                 "defaultModel": "gpt-5.6-terra",
                 "defaultRuntime": runtime,
             },
+            {
+                "id": "kimi",
+                "label": "Kimi",
+                "requiresApiKey": True,
+                "defaultModel": "kimi-k3",
+                "defaultRuntime": {**runtime, "maxOutputTokensPerTurn": 131_072},
+            },
         ],
     }
 

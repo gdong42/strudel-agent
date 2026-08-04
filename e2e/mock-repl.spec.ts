@@ -913,6 +913,7 @@ test('agent settings use backend defaults and persist browser overrides', async 
   await expect(page.locator('#settings-dialog')).toBeVisible();
   await expect(page.locator('#settings-provider')).toContainText('Backend default (mock)');
   await expect(page.locator('#settings-provider')).toContainText('DeepSeek');
+  await expect(page.locator('#settings-provider')).toContainText('Kimi');
   await page.locator('#settings-provider').selectOption('openai');
   await expect(page.locator('#settings-api-key')).toBeEnabled();
   await expect(page.locator('#settings-model')).toHaveAttribute('placeholder', 'Default: gpt-5.6-terra');
@@ -931,8 +932,8 @@ test('agent settings use backend defaults and persist browser overrides', async 
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('#settings-dialog')).not.toBeVisible();
   await expect(page.locator('#agent-provider-summary')).toHaveText('mock / local-test-model');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v1'))).toContain('local-test-model');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v1'))).toContain('"maxTotalTokens":null');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v2'))).toContain('local-test-model');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v2'))).toContain('"maxTotalTokens":null');
 
   await page.locator('#agent-intent').fill('Make it groovier.');
   await page.getByRole('button', { name: 'Stage change' }).click();
