@@ -7,7 +7,7 @@ from pathlib import Path
 from app.agent_runtime import build_run_budget, create_agent_run
 from app.changes import create_change_from_agent_run, undo_change
 from app.config import AgentRuntimeConfig
-from app.models import AgentFinalChange, AgentRun, AgentRunFailure, EditorVersion, RequestUserInput
+from app.models import AgentFinalChange, AgentFinalResponse, AgentRun, AgentRunFailure, EditorVersion, RequestUserInput
 from app.run_audit import AgentAuditLog, list_audit_records
 
 
@@ -111,3 +111,20 @@ def test_audit_log_records_change_undo_without_copying_accepted_code(project_pat
     assert record.final_explanation == "Added a kick."
     assert "PRIVATE accepted code" not in serialized
     assert "intent-secret" not in serialized
+
+
+def test_audit_log_records_a_safe_final_response(project_paths: dict[str, Path]) -> None:
+    audit = AgentAuditLog()
+    completed = rebuild(
+        make_run(),
+        status="completed",
+        finalResponse=AgentFinalResponse(content="The kick plays four times per cycle.").model_dump(by_alias=True),
+    )
+
+    audit.record_state(completed)
+
+    [record] = list_audit_records()
+    assert record.event == "run_completed"
+    assert record.final_response == "The kick plays four times per cycle."
+    assert record.final_action is None
+    assert record.final_explanation is None

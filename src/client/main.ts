@@ -369,8 +369,14 @@ async function applyAgentRunUpdate(run: AgentRunPublic): Promise<void> {
 }
 
 async function stageCompletedAgentRun(activeRun: ActiveAgentRun, run: AgentRunPublic): Promise<boolean> {
+  if (run.finalResponse) {
+    agentPanel.showResponse(run.finalResponse.content);
+    diffView.clear();
+    status.set('Agent response ready.', 'ok');
+    return true;
+  }
   if (!repl || !state || !run.finalChange) {
-    throw new Error('Completed Agent Run did not provide a final change');
+    throw new Error('Completed Agent Run did not provide a final result');
   }
 
   const finalChange = run.finalChange;
@@ -471,9 +477,7 @@ async function fireStagedChangeIfReady(
   }
 
   if (await evaluate()) {
-    agentPanel.clearChange();
-    diffView.clear();
-    status.set('Agent change staged and playing.', 'ok');
+    status.set('Agent change is playing.', 'ok');
   }
 }
 

@@ -221,7 +221,7 @@ test('manual agent change stages diff without evaluating and can be undone', asy
   await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
   const before = await page.getByTestId('mock-editor').inputValue();
   await page.locator('#agent-intent').fill('make the drums tighter');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.locator('#agent-intent')).toHaveValue('');
   await expect(page.locator('#agent-user-message')).toHaveText('make the drums tighter');
@@ -258,7 +258,7 @@ test('agent composer stays below the transcript and preserves an instruction whe
     Boolean(transcript.compareDocumentPosition(document.querySelector('#agent-form')) & Node.DOCUMENT_POSITION_FOLLOWING)
   ))).toBe(true);
   await page.locator('#agent-intent').fill('add brighter chords');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.locator('#status')).toContainText('Provider unavailable');
   await expect(page.locator('#agent-intent')).toHaveValue('add brighter chords');
@@ -268,7 +268,7 @@ test('agent composer stays below the transcript and preserves an instruction whe
 test('a new Agent turn archives the previous result and diff in the scrolling transcript', async ({ page }) => {
   await page.goto('/');
   await page.locator('#agent-intent').fill('tighten the drums');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('#status')).toContainText('staged. Review it');
   await expect(page.locator('#agent-diff')).toContainText('Agent draft: tighten the drums');
   await expect(page.locator('#agent-activity')).not.toHaveAttribute('open', '');
@@ -280,7 +280,7 @@ test('a new Agent turn archives the previous result and diff in the scrolling tr
   })).toBe(true);
 
   await page.locator('#agent-intent').fill('brighten the chords');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   const archivedTurn = page.locator('#agent-turn-history .agent-turn-archived');
   await expect(archivedTurn).toHaveCount(1);
@@ -301,7 +301,7 @@ test('agent can create the first track from an empty editor', async ({ page }) =
   await page.goto('/');
   await page.getByTestId('mock-editor').fill('');
   await page.locator('#agent-intent').fill('start a minimal house beat');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.locator('#status')).toContainText('staged. Review it');
   await expect(page.getByTestId('mock-editor')).toHaveValue(/s\("bd\*4"\)/);
@@ -310,14 +310,62 @@ test('agent can create the first track from an empty editor', async ({ page }) =
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
 });
 
+test('agent can answer without changing or staging editor code', async ({ page }) => {
+  let stageRequests = 0;
+  await page.route('**/agent/runs', async (route) => {
+    await route.fulfill({
+      status: 202,
+      json: {
+        id: 'response-run',
+        status: 'completed',
+        question: null,
+        finalChange: null,
+        finalResponse: {
+          content: '## Current rhythm\n\nThe kick plays **four times** per cycle.',
+        },
+        error: null,
+        activities: [{
+          sequence: 1,
+          kind: 'model_turn',
+          status: 'completed',
+          startedAt: 100,
+          completedAt: 101,
+          turn: 1,
+          tool: null,
+          message: null,
+        }],
+      },
+    });
+  });
+  page.on('request', (request) => {
+    if (/\/agent\/runs\/[^/]+\/stage$/.test(new URL(request.url()).pathname)) stageRequests += 1;
+  });
+  await page.goto('/');
+  const before = await page.getByTestId('mock-editor').inputValue();
+
+  await page.locator('#agent-intent').fill('Explain the current rhythm.');
+  await page.getByRole('button', { name: 'Send' }).click();
+
+  await expect(page.locator('#agent-explanation h2')).toHaveText('Current rhythm');
+  await expect(page.locator('#agent-explanation strong')).toHaveText('four times');
+  await expect(page.locator('#agent-activity-list')).toContainText('Working on request');
+  await expect(page.locator('#agent-activity-list')).not.toContainText('Generating change');
+  await expect(page.locator('#agent-diff')).toBeEmpty();
+  await expect(page.getByTestId('mock-editor')).toHaveValue(before);
+  await expect(page.locator('#status')).toContainText('response ready');
+  await expect.poll(() => stageRequests).toBe(0);
+});
+
 test('Auto Fire evaluates only after the final Run stage is acknowledged', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#auto-fire')).toBeEnabled();
   await page.locator('#auto-fire').check();
   await page.locator('#agent-intent').fill('lift the energy');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
-  await expect(page.locator('#status')).toContainText('staged and playing');
+  await expect(page.locator('#status')).toContainText('change is playing');
+  await expect(page.locator('#agent-result')).toBeVisible();
+  await expect(page.locator('#agent-diff')).toContainText('Agent draft: lift the energy');
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(1);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
 });
@@ -363,7 +411,7 @@ test('Auto Fire keeps a final with risk warnings staged for manual review', asyn
   await page.goto('/');
   await page.locator('#auto-fire').check();
   await page.locator('#agent-intent').fill('add a risky kick');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.getByTestId('mock-editor')).toHaveValue(finalCode);
   await expect(page.locator('#status')).toContainText('Auto Fire blocked by risk warnings');
@@ -456,17 +504,17 @@ test('agent activity timeline shows live model progress and safe tool names', as
 
   await page.goto('/');
   await page.locator('#agent-intent').fill('make a long transition');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.locator('#agent-activity')).toBeVisible();
   await expect(page.locator('#agent-activity-summary')).toContainText('Working · Turn 2');
-  await expect(page.locator('#agent-activity-list')).toContainText('Generating change');
+  await expect(page.locator('#agent-activity-list')).toContainText('Working on request');
   await expect(page.locator('#agent-activity-list')).toContainText('Balancing the drums before validation.');
   await expect(page.locator('#agent-activity-list strong')).toHaveText('Balancing');
   await expect(page.locator('#agent-activity-list .markdown-content code')).toHaveText('validation');
   await expect(page.locator('#agent-activity-list')).toContainText('Reviewing code changes');
   await expect(page.locator('#agent-activity-list')).toContainText('inspect_diff');
-  await expect(page.locator('#agent-activity-list')).toContainText('Revising change');
+  await expect(page.locator('#agent-activity-list')).toContainText('Continuing request');
   await expect(page.locator('#agent-activity-list')).not.toContainText('candidateCode');
   await expect(page.locator('#agent-activity-list')).not.toContainText('PRIVATE reasoning');
   await expect(page.locator('#agent-activity')).toHaveAttribute('open', '');
@@ -537,7 +585,7 @@ test('a running Agent Run recovers a missed terminal event by polling', async ({
   await page.goto('/');
   await page.getByTestId('mock-editor').fill('s("bd")');
   await page.locator('#agent-intent').fill('add a steady kick');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.getByTestId('mock-editor')).toHaveValue(finalCode);
   await expect(page.locator('#status')).toContainText('staged. Review it');
@@ -576,7 +624,7 @@ test('editor updates reach an active Agent Run in accepted-hash order', async ({
 
   await page.goto('/');
   await page.locator('#agent-intent').fill('make a long transition');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
   await page.getByTestId('mock-editor').fill('s("first edit")');
   await expect.poll(() => editorUpdates.length).toBe(1);
   await page.getByTestId('mock-editor').fill('s("second edit")');
@@ -608,7 +656,7 @@ test('a stale completed Agent Run reconciles against a concurrent editor edit', 
 
   await page.goto('/');
   await page.locator('#agent-intent').fill('make the drums tighter');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => started).toBe(true);
   await page.getByTestId('mock-editor').fill('s("user hats")');
 
@@ -648,13 +696,13 @@ test('an active Agent Run can be cancelled without changing the editor', async (
   const before = await page.getByTestId('mock-editor').inputValue();
 
   await page.locator('#agent-intent').fill('make a long transition');
-  await page.getByRole('button', { name: 'Stage change' }).click();
-  await expect(page.getByRole('button', { name: 'Stage change' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
   await page.getByRole('button', { name: 'Cancel' }).click();
 
   await expect(page.locator('#status')).toContainText('cancelled');
   await expect(page.getByTestId('mock-editor')).toHaveValue(before);
-  await expect(page.getByRole('button', { name: 'Stage change' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
 });
 
 test('a failed Agent Run leaves the editor and performance state unchanged', async ({ page }) => {
@@ -688,11 +736,11 @@ test('a failed Agent Run leaves the editor and performance state unchanged', asy
   await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
   const before = await page.getByTestId('mock-editor').inputValue();
   await page.locator('#agent-intent').fill('make the drums more intense');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.locator('#status')).toContainText('The provider is unavailable.');
   await expect(page.getByTestId('mock-editor')).toHaveValue(before);
-  await expect(page.getByRole('button', { name: 'Stage change' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Cancel' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
@@ -734,7 +782,7 @@ test('a paused Agent Run exposes only its clarification question and options', a
   await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
   const before = await page.getByTestId('mock-editor').inputValue();
   await page.locator('#agent-intent').fill('make the drums more energetic');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.locator('#agent-question')).toBeVisible();
   await expect(page.locator('#agent-user-message')).toHaveText('make the drums more energetic');
@@ -814,7 +862,7 @@ test('a clarification answer resumes the same Run after syncing the latest edito
   await page.goto('/');
   await expect(page.getByTestId('mock-editor')).not.toHaveValue('');
   await page.locator('#agent-intent').fill('make the drums more energetic');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('#agent-question')).toBeVisible();
 
   await page.getByTestId('mock-editor').fill('s("user hats")');
@@ -943,7 +991,7 @@ test('agent settings use backend defaults and persist browser overrides', async 
   await expect.poll(() => page.evaluate(() => localStorage.getItem('strudel-agent.settings.v2'))).toContain('"maxTotalTokens":null');
 
   await page.locator('#agent-intent').fill('Make it groovier.');
-  await page.getByRole('button', { name: 'Stage change' }).click();
+  await page.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => runRequest).not.toBeNull();
   expect(runRequest?.runtimeLimits).toEqual({
     maxTurns: 8,

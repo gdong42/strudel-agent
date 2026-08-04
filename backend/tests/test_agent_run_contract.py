@@ -115,9 +115,10 @@ def test_agent_run_public_projection_hides_internal_state() -> None:
             "id": "tempo",
             "question": "Should the tempo stay at 124 BPM?",
             "options": [{"id": "keep", "label": "Keep 124 BPM", "description": None}],
-        },
-        "finalChange": None,
-        "error": None,
+            },
+            "finalChange": None,
+            "finalResponse": None,
+            "error": None,
         "activities": [],
     }
     assert "PRIVATE" not in public_json
@@ -176,7 +177,7 @@ def test_agent_activity_contract_accepts_only_fixed_public_metadata() -> None:
 
 
 def test_agent_run_requires_only_status_appropriate_payloads() -> None:
-    with pytest.raises(ValidationError, match="require finalChange"):
+    with pytest.raises(ValidationError, match="require exactly one final result"):
         make_run(status="completed")
 
     with pytest.raises(ValidationError, match="Only completed runs"):
@@ -211,5 +212,11 @@ def test_agent_run_public_requires_status_appropriate_payloads() -> None:
         )
 
     completed = AgentRunPublic(id="run-1", status="completed", finalChange=make_final_change())
+    response = AgentRunPublic(
+        id="run-2",
+        status="completed",
+        finalResponse={"content": "The kick plays four times per cycle."},
+    )
 
     assert completed.model_dump(by_alias=True)["finalChange"]["code"] == 's("bd*4")'
+    assert response.model_dump(by_alias=True)["finalResponse"]["content"].startswith("The kick")

@@ -84,7 +84,34 @@ async def test_manager_drives_multiple_turns_to_a_final_public_change() -> None:
 
 
 @pytest.mark.anyio
-async def test_manager_streams_bounded_public_commentary_without_private_provider_data() -> None:
+async def test_manager_completes_a_text_response_without_a_change_tool() -> None:
+    provider = ScriptedAgentProvider(
+        [
+            ModelTurnResult(
+                assistantMessage=AgentMessage(
+                    role="assistant",
+                    content="## Current rhythm\n\nThe kick plays four times per cycle.",
+                )
+            )
+        ]
+    )
+    manager = AgentRunManager()
+
+    started = await start_run(manager, provider)
+    completed = await manager.wait(started.id)
+    public = await manager.get_public(started.id)
+
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed.final_change is None
+    assert completed.final_response is not None
+    assert public is not None
+    assert public.final_response == completed.final_response
+    assert [activity.kind for activity in public.activities] == ["model_turn"]
+
+
+@pytest.mark.anyio
+async def test_manager_streams_commentary_with_an_explicit_overflow_marker() -> None:
     first_commentary = asyncio.Event()
     release_provider = asyncio.Event()
     updates: list[AgentRunPublic] = []
@@ -94,7 +121,7 @@ async def test_manager_streams_bounded_public_commentary_without_private_provide
             raise AssertionError("The manager should use the streaming provider extension")
 
         async def next_turn_stream(self, request: ModelTurnRequest, on_commentary) -> ModelTurnResult:
-            await on_commentary("Reviewing the current groove.")
+            await on_commentary("x" * 5000)
             first_commentary.set()
             await release_provider.wait()
             await on_commentary("Reviewing the current groove before finalization.")
@@ -133,7 +160,9 @@ async def test_manager_streams_bounded_public_commentary_without_private_provide
     commentary = [activity for activity in running.activities if activity.kind == "commentary"]
     assert len(commentary) == 1
     assert commentary[0].status == "running"
-    assert commentary[0].message == "Reviewing the current groove."
+    assert commentary[0].message is not None
+    assert len(commentary[0].message) == 4096
+    assert commentary[0].message.endswith(" ... [progress truncated]")
     running_json = running.model_dump_json(by_alias=True)
     assert 's(\\"bd*4\\")' not in running_json
 
@@ -506,7 +535,8 @@ async def test_manager_publishes_safe_model_and_tool_activity() -> None:
 
     assert [update.status for update in updates] == ["running", "running", "running", "running", "completed"]
     assert all(
-        set(update.model_dump(by_alias=True)) == {"id", "status", "question", "finalChange", "error", "activities"}
+        set(update.model_dump(by_alias=True))
+        == {"id", "status", "question", "finalChange", "finalResponse", "error", "activities"}
         for update in updates
     )
     assert updates[0].activities == []

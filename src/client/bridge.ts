@@ -82,6 +82,10 @@ export interface AgentFinalChange {
   warnings: ChangeWarning[];
 }
 
+export interface AgentFinalResponse {
+  content: string;
+}
+
 export interface AgentRunFailure {
   code: 'budget_exhausted' | 'provider_error' | 'tool_error' | 'finalization_failed' | 'internal_error';
   message: string;
@@ -116,6 +120,7 @@ export interface AgentRunPublic {
   status: AgentRunStatus;
   question: AgentQuestion | null;
   finalChange: AgentFinalChange | null;
+  finalResponse: AgentFinalResponse | null;
   error: AgentRunFailure | null;
   activities: AgentActivity[];
 }

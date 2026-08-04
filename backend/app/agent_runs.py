@@ -37,7 +37,8 @@ from .tools import ToolRegistry
 
 RunUpdateListener = Callable[[AgentRunPublic], Awaitable[None]]
 _MAX_PUBLIC_ACTIVITIES = 48
-_MAX_PUBLIC_COMMENTARY_CHARS = 280
+_MAX_PUBLIC_COMMENTARY_CHARS = 4096
+_COMMENTARY_TRUNCATION_MARKER = " ... [progress truncated]"
 _PUBLIC_TOOL_NAMES = frozenset(
     {
         "inspect_diff",
@@ -399,6 +400,8 @@ class AgentRunManager:
                             deep=True,
                         )
                         activity_status = "cancelled" if updated.status == "cancelled" else "completed"
+                        if updated.final_response:
+                            updated = _remove_active_commentary_activity(updated)
                         updated = _finish_active_provider_activities(updated, activity_status)
                         updated = _append_tool_activities(
                             updated,
@@ -565,6 +568,15 @@ def _finish_active_commentary_activity(run: AgentRun, status: str) -> AgentRun:
     return run
 
 
+def _remove_active_commentary_activity(run: AgentRun) -> AgentRun:
+    activities = [
+        activity.model_copy(deep=True)
+        for activity in run.activities
+        if activity.kind != "commentary" or activity.status != "running"
+    ]
+    return run.model_copy(update={"activities": activities}, deep=True)
+
+
 def _finish_active_model_activity(run: AgentRun, status: str) -> AgentRun:
     activities = [activity.model_copy(deep=True) for activity in run.activities]
     for index in range(len(activities) - 1, -1, -1):
@@ -596,4 +608,7 @@ def _timestamp() -> int:
 
 def _normalize_public_commentary(value: str) -> str:
     normalized = " ".join(value.replace("`", "").split())
-    return normalized[:_MAX_PUBLIC_COMMENTARY_CHARS].strip()
+    if len(normalized) <= _MAX_PUBLIC_COMMENTARY_CHARS:
+        return normalized
+    content_limit = _MAX_PUBLIC_COMMENTARY_CHARS - len(_COMMENTARY_TRUNCATION_MARKER)
+    return normalized[:content_limit].rstrip() + _COMMENTARY_TRUNCATION_MARKER

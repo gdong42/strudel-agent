@@ -137,7 +137,7 @@ class AgentActivity(BaseModel):
     completed_at: int | None = Field(default=None, alias="completedAt", ge=0)
     turn: int | None = Field(default=None, ge=1)
     tool: AgentActivityTool | None = None
-    message: str | None = Field(default=None, min_length=1, max_length=280)
+    message: str | None = Field(default=None, min_length=1, max_length=4096)
 
     @model_validator(mode="after")
     def validate_activity_shape(self) -> "AgentActivity":
@@ -329,6 +329,7 @@ class AgentAuditRecord(BaseModel):
     answer: AuditTextFingerprint | None = None
     final_action: Literal["apply", "noop"] | None = Field(default=None, alias="finalAction")
     final_explanation: str | None = Field(default=None, alias="finalExplanation")
+    final_response: str | None = Field(default=None, alias="finalResponse")
     final_warnings: list[ChangeWarning] = Field(default_factory=list, alias="finalWarnings")
     change_id: str | None = Field(default=None, alias="changeId")
     error_code: str | None = Field(default=None, alias="errorCode")
@@ -341,6 +342,10 @@ class AgentFinalChange(BaseModel):
     action: Literal["apply", "noop"]
     warnings: list[ChangeWarning] = Field(default_factory=list)
     ranges: list[ChangedRange] | None = None
+
+
+class AgentFinalResponse(BaseModel):
+    content: str = Field(min_length=1)
 
 
 class AgentRunFailure(BaseModel):
@@ -407,6 +412,7 @@ class AgentRun(BaseModel):
     messages: list[AgentMessage] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list, alias="toolResults")
     final_change: AgentFinalChange | None = Field(default=None, alias="finalChange")
+    final_response: AgentFinalResponse | None = Field(default=None, alias="finalResponse")
     pending_input: RequestUserInput | None = Field(default=None, alias="pendingInput")
     failure: AgentRunFailure | None = None
     provider: str | None = None
@@ -415,14 +421,16 @@ class AgentRun(BaseModel):
 
     @model_validator(mode="after")
     def validate_status_shape(self) -> "AgentRun":
-        if self.status == "completed" and not self.final_change:
-            raise ValueError("Completed runs require finalChange")
+        if self.status == "completed" and (self.final_change is None) == (self.final_response is None):
+            raise ValueError("Completed runs require exactly one final result")
         if self.status == "needs_input" and not self.pending_input:
             raise ValueError("needs_input runs require pendingInput")
         if self.status == "failed" and not self.failure:
             raise ValueError("Failed runs require failure")
         if self.status in {"running", "needs_input", "failed", "cancelled"} and self.final_change:
             raise ValueError("Only completed runs may include finalChange")
+        if self.status != "completed" and self.final_response:
+            raise ValueError("Only completed runs may include finalResponse")
         if self.status != "needs_input" and self.pending_input:
             raise ValueError("Only needs_input runs may include pendingInput")
         if self.status != "failed" and self.failure:
@@ -437,6 +445,7 @@ class AgentRun(BaseModel):
             status=self.status,
             question=self.pending_input.to_public_question() if self.status == "needs_input" and self.pending_input else None,
             finalChange=self.final_change if self.status == "completed" else None,
+            finalResponse=self.final_response if self.status == "completed" else None,
             error=self.failure if self.status == "failed" else None,
             activities=[activity.model_copy(deep=True) for activity in self.activities],
         )
@@ -451,19 +460,22 @@ class AgentRunPublic(BaseModel):
     status: AgentRunStatus
     question: AgentQuestion | None = None
     final_change: AgentFinalChange | None = Field(default=None, alias="finalChange")
+    final_response: AgentFinalResponse | None = Field(default=None, alias="finalResponse")
     error: AgentRunFailure | None = None
     activities: list[AgentActivity] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_public_status_shape(self) -> "AgentRunPublic":
-        if self.status == "completed" and not self.final_change:
-            raise ValueError("Completed public runs require finalChange")
+        if self.status == "completed" and (self.final_change is None) == (self.final_response is None):
+            raise ValueError("Completed public runs require exactly one final result")
         if self.status == "needs_input" and not self.question:
             raise ValueError("needs_input public runs require question")
         if self.status == "failed" and not self.error:
             raise ValueError("Failed public runs require error")
         if self.status != "completed" and self.final_change:
             raise ValueError("Only completed public runs may include finalChange")
+        if self.status != "completed" and self.final_response:
+            raise ValueError("Only completed public runs may include finalResponse")
         if self.status != "needs_input" and self.question:
             raise ValueError("Only needs_input public runs may include question")
         if self.status != "failed" and self.error:

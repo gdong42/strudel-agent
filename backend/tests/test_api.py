@@ -335,7 +335,9 @@ def test_start_and_read_agent_run_exposes_only_public_state(
 
         assert started.status_code == 202
         started_payload = started.json()
-        assert set(started_payload) == {"id", "status", "question", "finalChange", "error", "activities"}
+        assert set(started_payload) == {
+            "id", "status", "question", "finalChange", "finalResponse", "error", "activities"
+        }
         assert started_payload["status"] == "running"
         assert started_payload["activities"] == []
         assert "test-provider" not in json.dumps(started_payload)
@@ -776,4 +778,6 @@ async def test_agent_run_event_contains_only_public_payload() -> None:
 
     assert event == "agent-run"
     assert payload == run.model_dump(by_alias=True)
-    assert set(payload) == {"id", "status", "question", "finalChange", "error", "activities"}
+    assert set(payload) == {
+        "id", "status", "question", "finalChange", "finalResponse", "error", "activities"
+    }

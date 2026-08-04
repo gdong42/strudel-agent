@@ -17,6 +17,7 @@ const runningRun: AgentRunPublic = {
   status: 'running',
   question: null,
   finalChange: null,
+  finalResponse: null,
   error: null,
   activities: [],
 };

@@ -547,12 +547,14 @@ async def test_execute_model_turn_allows_unlimited_cumulative_tokens_with_a_per_
 
     updated = await execute_model_turn(run, provider, ToolRegistry(), now=110)
 
-    assert updated.status == "running"
+    assert updated.status == "completed"
+    assert updated.final_response is not None
+    assert updated.final_response.content == "Continue."
     assert provider.requests[0].max_output_tokens == 65_536
 
 
 @pytest.mark.anyio
-async def test_execute_model_turn_preserves_plain_text_and_appends_runtime_feedback() -> None:
+async def test_execute_model_turn_completes_with_a_plain_text_final_response() -> None:
     run = make_run()
     provider = ScriptedAgentProvider(
         [ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="I need to think again."))]
@@ -560,10 +562,11 @@ async def test_execute_model_turn_preserves_plain_text_and_appends_runtime_feedb
 
     updated = await execute_model_turn(run, provider, ToolRegistry(), now=110)
 
-    assert updated.messages[-2].content == "I need to think again."
-    assert json.loads(updated.messages[-1].content)["runtimeFeedback"] == (
-        "The previous response did not request a tool. Continue by calling an available tool."
-    )
+    assert updated.status == "completed"
+    assert updated.messages[-1].content == "I need to think again."
+    assert updated.final_response is not None
+    assert updated.final_response.content == "I need to think again."
+    assert updated.to_public().final_response == updated.final_response
     assert updated.tool_results == []
 
 
@@ -919,16 +922,15 @@ async def test_execute_model_turn_pauses_only_for_a_valid_input_request() -> Non
 
 
 @pytest.mark.anyio
-async def test_execute_model_turn_returns_plain_text_and_terminal_conflicts_to_the_run() -> None:
+async def test_execute_model_turn_completes_plain_text_and_returns_terminal_conflicts_to_the_run() -> None:
     plain_text_provider = ScriptedAgentProvider(
         [ModelTurnResult(assistantMessage=AgentMessage(role="assistant", content="Done."))]
     )
     plain_text = await execute_model_turn(make_run(), plain_text_provider, ToolRegistry(), now=110)
 
-    assert plain_text.status == "running"
-    assert json.loads(plain_text.messages[-1].content)["runtimeFeedback"] == (
-        "The previous response did not request a tool. Continue by calling an available tool."
-    )
+    assert plain_text.status == "completed"
+    assert plain_text.final_response is not None
+    assert plain_text.final_response.content == "Done."
 
     conflict_provider = ScriptedAgentProvider(
         [

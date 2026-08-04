@@ -351,6 +351,8 @@ The current single-file POC can stay as a reference, but formal development shou
   elapsed time, and allowlisted tool names; restore it after reconnect.
 - Stream throttled public commentary from provider content channels while
   excluding reasoning events, tool arguments, and raw provider payloads.
+- Complete tool-free text turns as full user-facing responses; keep them
+  separate from code finalization, diff, and staging.
 - Keep candidates and recoverable findings internal; persist and stage only completed final changes.
 - Add `needs_input` pause/resume for material ambiguity, conflicting constraints, and key creative decisions.
 - Feed concurrent editor updates into the active run so the agent reconciles and self-reviews again.

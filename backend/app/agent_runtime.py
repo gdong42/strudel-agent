@@ -11,6 +11,7 @@ from uuid import uuid4
 from .config import AgentRuntimeConfig
 from .models import (
     AgentFinalChange,
+    AgentFinalResponse,
     AgentMessage,
     AgentRun,
     AgentRunBudget,
@@ -192,9 +193,9 @@ def cancel_agent_run(run: AgentRun, *, now: int | None = None) -> AgentRun:
 
 
 def discard_unstaged_completed_agent_run(run: AgentRun, *, now: int | None = None) -> AgentRun:
-    if run.status != "completed" or not run.final_change or run.staged_change_id:
+    if run.status != "completed" or run.staged_change_id:
         raise AgentRuntimeTransitionError("Only unstaged completed Agent Runs may be cancelled")
-    return _rebuild_run(run, now=now, status="cancelled", finalChange=None)
+    return _rebuild_run(run, now=now, status="cancelled", finalChange=None, finalResponse=None)
 
 
 def resume_agent_run(
@@ -281,7 +282,7 @@ def reopen_completed_agent_run(
     editor_version: EditorVersion,
     now: int | None = None,
 ) -> AgentRun:
-    if run.status != "completed" or not run.final_change:
+    if run.status != "completed" or (not run.final_change and not run.final_response):
         raise AgentRuntimeTransitionError("Only completed Agent Runs may be reopened after a stale final")
     if run.staged_change_id:
         raise AgentRuntimeTransitionError("A persisted Agent Run change cannot be reopened")
@@ -299,6 +300,7 @@ def reopen_completed_agent_run(
         status="running",
         editorVersion=editor_version,
         finalChange=None,
+        finalResponse=None,
         messages=[
             *run.messages,
             AgentMessage(
@@ -457,11 +459,15 @@ async def execute_model_turn(
         return failed_run
     tool_calls = result.assistant_message.tool_calls
     if not tool_calls:
-        return _append_runtime_feedback(
-            updated,
-            "The previous response did not request a tool. Continue by calling an available tool.",
-            now=now,
-        )
+        content = result.assistant_message.content.strip()
+        if content:
+            return _rebuild_run(
+                updated,
+                now=now,
+                status="completed",
+                finalResponse=AgentFinalResponse(content=content),
+            )
+        return _append_runtime_feedback(updated, "Return a final response or call an available tool.", now=now)
     terminal_calls = [call for call in tool_calls if call.name in _TERMINAL_TOOL_NAMES]
     if terminal_calls:
         if len(tool_calls) != 1 or len(terminal_calls) != 1:

@@ -204,6 +204,16 @@ export class AgentPanel {
     this.scrollToLatest(followLatest);
   }
 
+  showResponse(content: string): void {
+    const followLatest = this.isNearLatest();
+    renderMarkdownInto(this.explanation, content);
+    this.warnings.replaceChildren();
+    this.diff.replaceChildren();
+    this.result.hidden = false;
+    this.undo.disabled = true;
+    this.scrollToLatest(followLatest);
+  }
+
   clearChange(): void {
     this.result.hidden = true;
     this.explanation.textContent = '';
@@ -374,9 +384,9 @@ export class AgentPanel {
   }
 
   private activityLabel(activity: AgentActivity): string {
-    if (activity.kind === 'commentary') return activity.message ?? 'Working on the change';
+    if (activity.kind === 'commentary') return activity.message ?? 'Working on the request';
     if (activity.kind === 'model_turn') {
-      return activity.turn === 1 ? 'Generating change' : 'Revising change';
+      return activity.turn === 1 ? 'Working on request' : 'Continuing request';
     }
     if (activity.kind === 'editor_update') return 'Synced editor changes';
     if (activity.kind === 'user_input') return 'Applied your clarification';
@@ -419,7 +429,7 @@ const TOOL_ACTIVITY_LABELS: Record<AgentActivityTool, string> = {
   lookup_strudel_docs: 'Consulting the Strudel manual',
   lookup_samples: 'Looking up declared samples',
   inspect_sample_usage: 'Checking sample usage',
-  finalize_change: 'Finalizing change',
+  finalize_change: 'Preparing code change',
   request_user_input: 'Preparing a clarification',
   agent_tool: 'Running an agent tool',
 };

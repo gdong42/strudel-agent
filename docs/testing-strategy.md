@@ -127,14 +127,15 @@ results, not assert a model's private reasoning.
 | 6 | Turn/time/token budget is exhausted | Run becomes `failed`; no candidate is staged |
 | 7 | User cancels during model or tool work | Run becomes `cancelled`; editor/playback/history remain unchanged |
 | 8 | Provider/tool returns malformed data | Runtime records a sanitized failure or recoverable tool result without leaking credentials |
-| 9 | A Run contributes session conversation data | Only intent, public clarification, final explanation, and safe outcome enter bounded revision context; code, tools, credentials, and hidden reasoning do not |
+| 9 | A Run contributes session conversation data | Only intent, public clarification, final explanation or response, and safe outcome enter bounded revision context; code, tools, credentials, and hidden reasoning do not |
 | 10 | A Run or Change lifecycle event is persisted | Audit links IDs and safe outcome metadata while excluding raw input, code, credentials, provider payloads, and hidden reasoning |
-| 11 | A model turn streams commentary and calls tools | Public activity reports bounded commentary and fixed model/tool metadata while excluding candidate code, reasoning, tool arguments/results, and raw provider payloads |
-| 12 | OpenAI, DeepSeek, or Kimi returns streamed text, reasoning, and tool-call deltas | Only public content reaches the commentary callback; the complete normalized tool turn is reconstructed privately, including Kimi preserved thinking history |
-| 13 | Browser switches between API-key providers | Each provider loads only its own session or persistent key; no credential is copied to another provider |
-| 14 | Model calls `lookup_strudel_docs` with an exact function symbol | The pinned local result and examples enter private tool history; only a fixed tool-activity label is public |
-| 15 | Candidate has invalid JavaScript or Mini Notation | Parser error category and line/column enter private tool history; finalization is rejected and the Agent revises internally |
-| 16 | Static validator process cannot start, times out, or returns malformed output | Validation fails closed without exposing process details or staging unchecked code |
+| 11 | A model turn streams commentary and calls tools | Public activity reports explicitly bounded commentary with a visible truncation marker plus fixed model/tool metadata while excluding candidate code, reasoning, tool arguments/results, and raw provider payloads |
+| 12 | A model turn returns non-empty text without tools | Run completes with a full final response; no candidate validation, editor mutation, diff, or change stage occurs |
+| 13 | OpenAI, DeepSeek, or Kimi returns streamed text, reasoning, and tool-call deltas | Only public content reaches the commentary callback; the complete normalized tool turn is reconstructed privately, including Kimi preserved thinking history |
+| 14 | Browser switches between API-key providers | Each provider loads only its own session or persistent key; no credential is copied to another provider |
+| 15 | Model calls `lookup_strudel_docs` with an exact function symbol | The pinned local result and examples enter private tool history; only a fixed tool-activity label is public |
+| 16 | Candidate has invalid JavaScript or Mini Notation | Parser error category and line/column enter private tool history; finalization is rejected and the Agent revises internally |
+| 17 | Static validator process cannot start, times out, or returns malformed output | Validation fails closed without exposing process details or staging unchecked code |
 
 ---
 
@@ -236,6 +237,7 @@ It should also dispatch the same `update` event expected by the app.
 | 16 | Agent Run is active, streams commentary, then reconnects or misses a terminal event | Timeline shows elapsed/turn/commentary/tool progress without private payloads and restores or polls the bounded activity state |
 | 17 | Agent returns Markdown commentary or a final explanation | Headings, lists, emphasis, and code render structurally; unsafe URLs and unapproved HTML/media are removed |
 | 18 | User resets Agent context between Runs | Backend revision context and visible transcript clear; code, snapshots, changes, and audit state remain unchanged |
+| 19 | Agent returns a response without a code change | Full Markdown response appears once as the final result; editor, diff, playback, and change history remain unchanged |
 
 ### 5.4 Real REPL smoke tests
 

@@ -32,6 +32,7 @@ class _ConversationRecord:
     clarifications: list[_Clarification] = field(default_factory=list)
     final_action: str | None = None
     final_explanation: str | None = None
+    final_response: str | None = None
     final_warnings: list[dict[str, str]] = field(default_factory=list)
     change_id: str | None = None
     error_code: str | None = None
@@ -76,6 +77,7 @@ class SessionConversation:
         if run.status == "running":
             record.final_action = None
             record.final_explanation = None
+            record.final_response = None
             record.final_warnings = []
             record.change_id = None
             record.error_code = None
@@ -96,15 +98,27 @@ class SessionConversation:
                 or any(warning["message"] != source.message for warning, source in zip(warnings, run.final_change.warnings))
             ):
                 record.truncated = True
+        elif run.status == "completed" and run.final_response:
+            response = self._bounded_text(run.final_response.content)
+            record.final_action = None
+            record.final_explanation = None
+            record.final_response = response
+            record.final_warnings = []
+            record.change_id = None
+            record.error_code = None
+            if response != run.final_response.content:
+                record.truncated = True
         elif run.status == "failed" and run.failure:
             record.final_action = None
             record.final_explanation = None
+            record.final_response = None
             record.final_warnings = []
             record.change_id = None
             record.error_code = run.failure.code
         elif run.status == "cancelled":
             record.final_action = None
             record.final_explanation = None
+            record.final_response = None
             record.final_warnings = []
             record.change_id = None
             record.error_code = None
@@ -192,6 +206,8 @@ class SessionConversation:
             outcome["action"] = record.final_action
         if record.final_explanation:
             outcome["explanation"] = record.final_explanation
+        if record.final_response:
+            outcome["response"] = record.final_response
         if record.final_warnings:
             outcome["warnings"] = record.final_warnings
         if record.change_id:

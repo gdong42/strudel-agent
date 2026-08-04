@@ -1,7 +1,7 @@
 from app.prompt_contract import AGENT_RUNTIME_SYSTEM_PROMPT, build_agent_runtime_system_prompt
 
 
-def test_runtime_prompt_requires_tool_driven_finalization_and_limited_clarification() -> None:
+def test_runtime_prompt_distinguishes_code_finalization_from_final_responses() -> None:
     assert "finalize_change" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "request_user_input" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "material ambiguity" in AGENT_RUNTIME_SYSTEM_PROMPT
@@ -10,7 +10,8 @@ def test_runtime_prompt_requires_tool_driven_finalization_and_limited_clarificat
     assert "lookup_samples" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "lookup_strudel_docs" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "inspect_sample_usage" in AGENT_RUNTIME_SYSTEM_PROMPT
-    assert "public progress channel" in AGENT_RUNTIME_SYSTEM_PROMPT
+    assert "complete user-facing Markdown response and no tool call" in AGENT_RUNTIME_SYSTEM_PROMPT
+    assert "On a final response turn without tool calls" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "hidden reasoning" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "valid blank project" in AGENT_RUNTIME_SYSTEM_PROMPT
     assert "<strudel-skill>" in AGENT_RUNTIME_SYSTEM_PROMPT

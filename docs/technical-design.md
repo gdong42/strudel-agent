@@ -133,6 +133,7 @@ turns             — normalized model messages and tool results needed to conti
 budgets           — turn, active-time, token, and cancellation limits
 activities        — bounded, browser-safe progress metadata
 finalChange       — present only after successful finalization
+finalResponse     — present only for a completed response-only run
 pendingQuestion   — present only while needs_input
 ```
 
@@ -142,9 +143,10 @@ history. The browser may observe normalized activity metadata such as a model
 turn starting, bounded public commentary, or an allowlisted tool completing,
 but never the underlying candidate, tool arguments, tool result, raw provider
 event, or hidden reasoning.
-A completed run crosses the staging boundary exactly once: its final change is
-compared with the latest editor version, staged, and then handled by Manual Fire
-or Auto Fire.
+A completed response-only run is displayed directly and never enters change
+staging. A completed code run crosses the staging boundary exactly once: its
+final change is compared with the latest editor version, staged, and then
+handled by Manual Fire or Auto Fire.
 
 `needs_input` is not a failed validation state. The agent may use it only when
 the user's intent is materially ambiguous, constraints conflict, or a creative
@@ -260,9 +262,14 @@ Initial runtime tools:
   Strudel tutorials and function reference. Exact API names and aliases receive
   priority over broad text matches.
 - `finalize_change(code, explanation, action, warnings)`: request completion. The
-  runtime applies deterministic finalization gates before accepting it.
+  runtime applies deterministic finalization gates before accepting a code result.
 - `request_user_input(question, options, reason)`: pause only for material
   ambiguity, conflicting constraints, or a key user decision.
+
+A non-empty assistant message without tool calls completes the Run as a public
+Markdown response. It does not enter candidate validation, change staging, or
+the editor. A request that requires code must still finish through
+`finalize_change`; a response-only result is not treated as a no-op change.
 
 Tool results are observations for the agent, not user-facing workflow states.
 If `inspect_diff` shows that a candidate changed bass despite "only change
@@ -335,14 +342,14 @@ user intent + current editor version
              running
                 │
       model turn / tool call loop
-       ┌────────┼──────────────┐
-       │        │              │
- recoverable   material      finalized
- finding       ambiguity      candidate
-       │        │              │
-       │        ▼              ▼
-       │   needs_input    finalization gates
-       │        │          ├─ fail → tool result → running
+       ┌────────┼──────────────┬────────────────┐
+       │        │              │                │
+ recoverable   material      finalized      final text
+ finding       ambiguity      candidate      response
+       │        │              │                │
+       │        ▼              ▼                ▼
+       │   needs_input    finalization gates  completed
+       │        │          ├─ fail → running
        │   user answer     └─ pass → completed
        │        │                         │
        └────────┴────────► running        ▼
@@ -351,7 +358,8 @@ user intent + current editor version
 
 Only public boundary states cross into the user-facing workflow:
 
-- `completed`: stage the final change and show its final explanation/diff.
+- `completed`: show either a complete Markdown response or a final code result;
+  only an apply code result enters change staging and diff review.
 - `needs_input`: show one concise clarification or decision request, then
   resume the same run after the answer.
 - `failed`: explain that the run could not complete; keep editor and playback
@@ -367,9 +375,10 @@ While a Run is active, a separate read-only activity timeline makes waiting
 observable without turning intermediate work into user decisions. It may show
 model-turn state, elapsed time, turn number, editor-context updates, user-input
 resumption, allowlisted tool names, and one bounded public-commentary entry per
-model turn. Commentary is the only model prose allowed here: the system prompt
-defines it as short, high-level progress and the server normalizes and limits
-it. The client renders commentary and final explanations as sanitized Markdown;
+model turn. Tool-calling commentary is short progress; a tool-free assistant
+message becomes the authoritative final response instead. The server keeps a
+larger defensive activity bound and adds an explicit truncation marker rather
+than silently cutting text. The client renders commentary, final responses, and final explanations as sanitized Markdown;
 raw HTML, executable content, unsafe links, images, and embedded media are not
 allowed. Candidate code, reasoning, tool arguments/results, and raw provider
 payloads remain private. Activity does not change the Run lifecycle or staging
@@ -405,14 +414,16 @@ class AgentRunPublic(BaseModel):
     activities: list[AgentActivity]
     question: AgentQuestion | None = None
     final_change: AgentFinalChange | None = None
+    final_response: AgentFinalResponse | None = None
     error: AgentRunFailure | None = None
 ```
 
 The public representation excludes internal candidates, recoverable findings,
 raw provider messages, tool arguments and results, and hidden reasoning.
 `activities` is a bounded projection with fixed activity kinds, statuses, and
-allowlisted tool names plus an optional length-limited commentary message; it is
-not a transcript of the private Agent Run.
+allowlisted tool names plus an optional bounded commentary message; it is not a
+transcript of the private Agent Run. A completed Run exposes exactly one of
+`final_change` or `final_response`.
 
 #### 6.6.1 Session Conversation Context
 
@@ -455,8 +466,9 @@ as conversation context.
 
 P4F.3 writes a separate, append-only event log under `audits/` for lifecycle and
 recovery correlation. Events retain run/change IDs, timestamps, status,
-provider/model, usage totals, final action/explanation/warnings, linked change
-ID, and safe error code. They do not persist raw intent or clarification text:
+provider/model, usage totals, a bounded final response or change
+action/explanation/warnings, linked change ID, and safe error code. They do not
+persist raw intent or clarification text:
 the app cannot reliably distinguish a user-pasted secret from ordinary
 natural-language input. The log retains a SHA-256 fingerprint and byte count
 for those inputs when correlation is needed.
@@ -567,7 +579,7 @@ editing.
 | `backend/app/session_conversation.py` | Bounded, in-memory summaries used only as revision context |
 | `backend/app/run_audit.py` | Best-effort, append-only safe lifecycle and change audit events |
 | `backend/app/evaluations.py` | Version-controlled evaluation scenario schema and fixture validation |
-| `backend/app/prompt_contract.py` | Shared agent instructions and final-change schema |
+| `backend/app/prompt_contract.py` | Shared agent instructions and response/change completion contract |
 | `backend/app/project_context.py` | Bounded, project-root-confined loading of optional musical context |
 | `backend/app/tools/` | Tool registry and deterministic tool implementations |
 | `backend/app/providers/` | Vendor-specific model-turn and tool-call adapters |

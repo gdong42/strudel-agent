@@ -4,7 +4,7 @@ import json
 
 from app.agent_runtime import build_run_budget, create_agent_run
 from app.config import AgentRuntimeConfig
-from app.models import AgentFinalChange, AgentRun, AgentRunFailure, EditorVersion, RequestUserInput
+from app.models import AgentFinalChange, AgentFinalResponse, AgentRun, AgentRunFailure, EditorVersion, RequestUserInput
 from app.session_conversation import SessionConversation
 
 
@@ -97,6 +97,26 @@ def test_session_conversation_tracks_safe_terminal_outcomes_without_failure_mess
 
     assert context[0]["outcome"] == {"status": "failed", "errorCode": "provider_error"}
     assert "PRIVATE provider detail" not in json.dumps(context)
+
+
+def test_session_conversation_records_a_bounded_final_response() -> None:
+    conversation = SessionConversation()
+    started = make_run("run-1", intent="Explain this rhythm.")
+    conversation.record_started(started)
+    conversation.record_state(
+        rebuild(
+            started,
+            status="completed",
+            finalResponse=AgentFinalResponse(content="The kick plays four times per cycle.").model_dump(by_alias=True),
+        )
+    )
+
+    context = conversation.model_context()
+
+    assert context[0]["outcome"] == {
+        "status": "completed",
+        "response": "The kick plays four times per cycle.",
+    }
 
 
 def test_session_conversation_clear_removes_all_revision_context() -> None:

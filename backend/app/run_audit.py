@@ -56,6 +56,19 @@ class AgentAuditLog:
                 )
             )
             return
+        if run.status == "completed" and run.final_response:
+            response, truncated = _bounded_text(run.final_response.content, _MAX_EXPLANATION_BYTES)
+            self._append(
+                self._run_record(
+                    run,
+                    event="run_completed",
+                    occurred_at=run.updated_at,
+                    status=run.status,
+                    final_response=response,
+                    truncated=truncated,
+                )
+            )
+            return
         if run.status == "failed" and run.failure:
             self._append(
                 self._run_record(
@@ -139,6 +152,7 @@ class AgentAuditLog:
         answer: AuditTextFingerprint | None = None,
         final_action: str | None = None,
         final_explanation: str | None = None,
+        final_response: str | None = None,
         final_warnings: list[ChangeWarning] | None = None,
         change_id: str | None = None,
         error_code: str | None = None,
@@ -160,6 +174,7 @@ class AgentAuditLog:
             answer=answer,
             finalAction=final_action,
             finalExplanation=final_explanation,
+            finalResponse=final_response,
             finalWarnings=final_warnings or [],
             changeId=change_id,
             errorCode=error_code,
