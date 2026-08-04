@@ -317,6 +317,12 @@ class AgentRunManager:
             run_ids = list(self._entries)
         await asyncio.gather(*(self.cancel(run_id) for run_id in run_ids))
 
+    async def clear_conversation(self) -> None:
+        async with self._entries_lock:
+            if any(entry.run.status in {"running", "needs_input"} for entry in self._entries.values()):
+                raise AgentRuntimeTransitionError("Conversation context cannot be reset while an Agent Run is active")
+            self._conversation.clear()
+
     async def _entry(self, run_id: str) -> _RunEntry | None:
         async with self._entries_lock:
             return self._entries.get(run_id)

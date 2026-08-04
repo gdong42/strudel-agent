@@ -330,7 +330,7 @@ test('Auto Fire keeps a final with risk warnings staged for manual review', asyn
     question: null,
     finalChange: {
       code: finalCode,
-      explanation: 'Added a kick with an unverified sample risk.',
+      explanation: '**Added** a `bd` kick.\n\n- Four on the floor\n- Kept the bass unchanged\n\n[unsafe](javascript:alert(1))\n\n<img src=x onerror=alert(1)>',
       action: 'apply',
       warnings: [{ level: 'risk', message: 'Unverified sample.', category: 'sample' }],
     },
@@ -367,6 +367,11 @@ test('Auto Fire keeps a final with risk warnings staged for manual review', asyn
 
   await expect(page.getByTestId('mock-editor')).toHaveValue(finalCode);
   await expect(page.locator('#status')).toContainText('Auto Fire blocked by risk warnings');
+  await expect(page.locator('#agent-explanation strong')).toHaveText('Added');
+  await expect(page.locator('#agent-explanation code')).toHaveText('bd');
+  await expect(page.locator('#agent-explanation li')).toHaveCount(2);
+  await expect(page.locator('#agent-explanation a')).not.toHaveAttribute('href');
+  await expect(page.locator('#agent-explanation img')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
   await expect.poll(() => page.evaluate(() => window.__mockEvaluateCalls)).toBe(0);
 });
@@ -404,7 +409,7 @@ test('agent activity timeline shows live model progress and safe tool names', as
         completedAt: startedAt + 1,
         turn: null,
         tool: null,
-        message: 'Balancing the drums before validation.',
+        message: '**Balancing** the drums before `validation`.',
       },
       {
         sequence: 3,
@@ -457,6 +462,8 @@ test('agent activity timeline shows live model progress and safe tool names', as
   await expect(page.locator('#agent-activity-summary')).toContainText('Working · Turn 2');
   await expect(page.locator('#agent-activity-list')).toContainText('Generating change');
   await expect(page.locator('#agent-activity-list')).toContainText('Balancing the drums before validation.');
+  await expect(page.locator('#agent-activity-list strong')).toHaveText('Balancing');
+  await expect(page.locator('#agent-activity-list .markdown-content code')).toHaveText('validation');
   await expect(page.locator('#agent-activity-list')).toContainText('Reviewing code changes');
   await expect(page.locator('#agent-activity-list')).toContainText('inspect_diff');
   await expect(page.locator('#agent-activity-list')).toContainText('Revising change');
@@ -944,6 +951,25 @@ test('agent settings use backend defaults and persist browser overrides', async 
     maxTotalTokens: null,
     maxOutputTokensPerTurn: 65_536,
   });
+});
+
+test('reset context clears the visible conversation through the backend', async ({ page }) => {
+  let resetRequests = 0;
+  await page.route('**/agent/conversation', async (route) => {
+    if (route.request().method() === 'DELETE') resetRequests += 1;
+    await route.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/');
+  await page.locator('#agent-turn-history').evaluate((history) => {
+    history.append(Object.assign(document.createElement('article'), { textContent: 'Earlier Agent result' }));
+  });
+  await expect(page.locator('#agent-turn-history')).toContainText('Earlier Agent result');
+
+  await page.getByRole('button', { name: 'Reset context' }).click();
+
+  await expect.poll(() => resetRequests).toBe(1);
+  await expect(page.locator('#agent-turn-history')).toBeEmpty();
+  await expect(page.locator('#status')).toContainText('conversation context reset');
 });
 
 declare global {

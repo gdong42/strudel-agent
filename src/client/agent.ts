@@ -7,6 +7,7 @@ import type {
   ApplyMode,
   ChangeWarning,
 } from './bridge';
+import { renderMarkdownInto } from './markdown';
 
 export interface AgentFormValue {
   intent: string;
@@ -22,6 +23,7 @@ export class AgentPanel {
   private submitHandler: ((value: AgentFormValue) => void) | null = null;
   private undoHandler: (() => void) | null = null;
   private cancelHandler: (() => void) | null = null;
+  private resetContextHandler: (() => void) | null = null;
   private answerHandler: ((value: AgentQuestionAnswer) => void) | null = null;
   private autoFireAvailable = true;
   private currentQuestion: AgentQuestion | null = null;
@@ -41,6 +43,7 @@ export class AgentPanel {
     private readonly submit: HTMLButtonElement,
     private readonly cancel: HTMLButtonElement,
     private readonly undo: HTMLButtonElement,
+    private readonly resetContext: HTMLButtonElement,
     private readonly transcript: HTMLElement,
     private readonly turnHistory: HTMLElement,
     private readonly currentTurn: HTMLElement,
@@ -71,6 +74,7 @@ export class AgentPanel {
     });
     undo.addEventListener('click', () => this.undoHandler?.());
     cancel.addEventListener('click', () => this.cancelHandler?.());
+    resetContext.addEventListener('click', () => this.resetContextHandler?.());
     questionForm.addEventListener('submit', (event) => {
       event.preventDefault();
       const question = this.currentQuestion;
@@ -89,10 +93,12 @@ export class AgentPanel {
   onSubmit(handler: (value: AgentFormValue) => void): void { this.submitHandler = handler; }
   onUndo(handler: () => void): void { this.undoHandler = handler; }
   onCancel(handler: () => void): void { this.cancelHandler = handler; }
+  onResetContext(handler: () => void): void { this.resetContextHandler = handler; }
   onAnswer(handler: (value: AgentQuestionAnswer) => void): void { this.answerHandler = handler; }
   setBusy(busy: boolean): void {
     this.submit.disabled = busy;
     this.cancel.hidden = !busy;
+    this.resetContext.disabled = busy;
     this.autoFire.disabled = busy || !this.autoFireAvailable;
   }
   disableAutoFire(): void { this.autoFire.checked = false; }
@@ -174,9 +180,15 @@ export class AgentPanel {
     this.activityList.replaceChildren();
   }
 
+  resetConversationView(): void {
+    this.turnHistory.replaceChildren();
+    this.resetCurrentTurn();
+    this.scrollToLatest(true);
+  }
+
   showChange(change: Pick<AgentFinalChange, 'explanation' | 'warnings'>): void {
     const followLatest = this.isNearLatest();
-    this.explanation.textContent = change.explanation;
+    renderMarkdownInto(this.explanation, change.explanation);
     this.renderWarnings(change.warnings);
     this.result.hidden = false;
     this.undo.disabled = false;
@@ -185,7 +197,7 @@ export class AgentPanel {
 
   showNoop(change: Pick<AgentFinalChange, 'explanation' | 'warnings'>): void {
     const followLatest = this.isNearLatest();
-    this.explanation.textContent = change.explanation;
+    renderMarkdownInto(this.explanation, change.explanation);
     this.renderWarnings(change.warnings);
     this.result.hidden = false;
     this.undo.disabled = true;
@@ -323,7 +335,11 @@ export class AgentPanel {
   }
 
   private renderActivityItem(activity: AgentActivity): HTMLLIElement {
-    const item = this.activityItem(this.activityLabel(activity), activity.status);
+    const item = this.activityItem(
+      this.activityLabel(activity),
+      activity.status,
+      activity.kind === 'commentary',
+    );
     item.dataset.kind = activity.kind;
     if (activity.kind === 'tool' && activity.tool) {
       const tool = document.createElement('code');
@@ -339,17 +355,19 @@ export class AgentPanel {
     return item;
   }
 
-  private activityItem(label: string, status: AgentActivity['status']): HTMLLIElement {
+  private activityItem(label: string, status: AgentActivity['status'], markdown = false): HTMLLIElement {
     const item = document.createElement('li');
     item.className = 'agent-activity-item';
     item.dataset.status = status;
     const marker = document.createElement('span');
     marker.className = 'agent-activity-marker';
     marker.setAttribute('aria-hidden', 'true');
-    const copy = document.createElement('span');
+    const copy = document.createElement('div');
     copy.className = 'agent-activity-copy';
-    const text = document.createElement('span');
-    text.textContent = label;
+    const text = document.createElement('div');
+    text.className = markdown ? 'markdown-content markdown-content-compact' : '';
+    if (markdown) renderMarkdownInto(text, label);
+    else text.textContent = label;
     copy.append(text);
     item.append(marker, copy);
     return item;

@@ -158,6 +158,7 @@ results, not assert a model's private reasoning.
 | `POST /snapshots` | Creates snapshot, returns record | 400 on empty code |
 | `POST /snapshots/:id/revert` | Reverts track and returns snapshot | 404 on unknown id |
 | `GET /samples` | Returns project-declared sample names and metadata | Missing registry is an empty unconfigured catalog; malformed registry returns a sanitized 400 |
+| `DELETE /agent/conversation` | Clears bounded cross-Run context without changing durable project state | 409 while a Run is active |
 | `POST /agent/runs` | Starts a run and returns public status | 400 on empty intent/code, invalid project context, or provider configuration errors; private context is never public |
 | `GET /agent/runs/:id` | Returns public run projection | 404 on unknown id; excludes candidates/provider internals |
 | `POST /agent/runs/:id/input` | Resumes a `needs_input` run with the original provider/model | 409 for wrong run state, question, or provider/model |
@@ -233,6 +234,8 @@ It should also dispatch the same `update` event expected by the app.
 | 14 | Completed Manual Fire run | One final change is staged with final diff/explanation; no evaluate call |
 | 15 | Completed Auto Fire run passes gates | Final change evaluates once; failed gates return to the agent or block completion |
 | 16 | Agent Run is active, streams commentary, then reconnects or misses a terminal event | Timeline shows elapsed/turn/commentary/tool progress without private payloads and restores or polls the bounded activity state |
+| 17 | Agent returns Markdown commentary or a final explanation | Headings, lists, emphasis, and code render structurally; unsafe URLs and unapproved HTML/media are removed |
+| 18 | User resets Agent context between Runs | Backend revision context and visible transcript clear; code, snapshots, changes, and audit state remain unchanged |
 
 ### 5.4 Real REPL smoke tests
 

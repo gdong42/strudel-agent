@@ -167,6 +167,15 @@ async def get_agent_settings() -> dict[str, Any]:
     ).model_dump(by_alias=True)
 
 
+@app.delete("/agent/conversation")
+async def reset_agent_conversation() -> dict[str, bool]:
+    try:
+        await agent_runs.clear_conversation()
+    except AgentRuntimeTransitionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"ok": True}
+
+
 @app.post("/agent/providers/test")
 async def test_agent_provider(payload: ProviderTestRequest) -> dict[str, Any]:
     try:

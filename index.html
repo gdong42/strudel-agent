@@ -29,7 +29,10 @@
           <div class="agent-panel-header">
             <h2 id="agent-heading">Agent</h2>
             <p class="provider-summary">Provider: <span id="agent-provider-summary">loading...</span></p>
-            <button id="open-snapshots" class="snapshot-trigger" type="button" aria-label="Open snapshots">Snapshots <span id="snapshot-count">0</span></button>
+            <div class="agent-panel-actions">
+              <button id="reset-agent-context" class="agent-header-action" type="button" title="Clear conversation context">Reset context</button>
+              <button id="open-snapshots" class="snapshot-trigger" type="button" aria-label="Open snapshots">Snapshots <span id="snapshot-count">0</span></button>
+            </div>
           </div>
           <div id="agent-transcript" class="agent-transcript">
             <div id="agent-turn-history" class="agent-turn-history"></div>
@@ -53,7 +56,7 @@
                 </form>
               </section>
               <div id="agent-result" class="agent-result" hidden>
-                <p id="agent-explanation"></p>
+                <div id="agent-explanation" class="markdown-content"></div>
                 <div id="agent-warnings" aria-live="polite"></div>
                 <div id="agent-diff" class="diff-view" aria-label="Staged code diff"></div>
               </div>

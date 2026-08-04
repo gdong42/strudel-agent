@@ -99,6 +99,19 @@ def test_session_conversation_tracks_safe_terminal_outcomes_without_failure_mess
     assert "PRIVATE provider detail" not in json.dumps(context)
 
 
+def test_session_conversation_clear_removes_all_revision_context() -> None:
+    conversation = SessionConversation()
+    started = make_run("run-1")
+    conversation.record_started(started)
+    conversation.record_state(rebuild(started, status="cancelled"))
+
+    assert conversation.model_context()
+
+    conversation.clear()
+
+    assert conversation.model_context() == []
+
+
 def test_session_conversation_evicts_old_records_and_marks_truncated_text() -> None:
     conversation = SessionConversation(max_records=2, max_bytes=512)
     for index in range(3):

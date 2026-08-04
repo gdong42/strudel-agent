@@ -10,6 +10,7 @@ import {
   fetchState,
   fetchTrack,
   revertSnapshot,
+  resetAgentConversation,
   saveTrack,
   startAgentRun,
   undoChange,
@@ -81,6 +82,7 @@ const agentPanel = new AgentPanel(
   requireElement<HTMLButtonElement>('#stage-change'),
   requireElement<HTMLButtonElement>('#cancel-change'),
   requireElement<HTMLButtonElement>('#undo-change'),
+  requireElement<HTMLButtonElement>('#reset-agent-context'),
   requireElement<HTMLElement>('#agent-transcript'),
   requireElement<HTMLElement>('#agent-turn-history'),
   requireElement<HTMLElement>('#agent-current-turn'),
@@ -699,6 +701,19 @@ async function cancelActiveAgentRun(): Promise<void> {
   }
 }
 
+async function resetAgentContext(): Promise<void> {
+  if (activeAgentRun || startingAgentRun) return;
+  status.set('Resetting Agent context...', 'warn');
+  try {
+    await resetAgentConversation();
+    agentPanel.resetConversationView();
+    clearActiveAgentRun(sessionStorage);
+    status.set('Agent conversation context reset.', 'ok');
+  } catch (error) {
+    status.set(error instanceof Error ? error.message : String(error), 'error');
+  }
+}
+
 async function answerActiveAgentRun(value: { questionId: string; answer: string }): Promise<void> {
   const activeRun = activeAgentRun;
   if (!activeRun) return;
@@ -815,6 +830,7 @@ snapshotDialog.addEventListener('click', (event) => {
 agentPanel.onSubmit((value) => { stageAgentChange(value); });
 agentPanel.onUndo(() => { undoAgentStage(); });
 agentPanel.onCancel(() => { cancelActiveAgentRun(); });
+agentPanel.onResetContext(() => { resetAgentContext(); });
 agentPanel.onAnswer((value) => { answerActiveAgentRun(value); });
 
 boot().catch((error) => {

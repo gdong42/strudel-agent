@@ -125,6 +125,8 @@ workflow.
 - [x] **P4F.1** Define session conversation state and retention boundaries
 - [x] **P4F.2** Include recent requests, user clarifications, final explanations, and outcomes in revisions
 - [x] **P4F.3** Persist run/change audit data without credentials, hidden reasoning, or discarded candidate code
+- [x] **P4F.4** Add a development-facing reset action for bounded session conversation context
+- [ ] **P4F.5** Add token-aware session context compaction with inspectable summary boundaries
 
 ### Phase 4G: Evaluation and Agent Tuning
 

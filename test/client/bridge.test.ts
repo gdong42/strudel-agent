@@ -6,6 +6,7 @@ import {
   connectTrackEvents,
   fetchAgentRun,
   fetchSamples,
+  resetAgentConversation,
   startAgentRun,
   updateAgentRunEditor,
   type AgentRunPublic,
@@ -91,6 +92,15 @@ describe('Agent Run bridge', () => {
     await expect(fetchSamples()).resolves.toEqual(catalog);
 
     expect(fetchMock).toHaveBeenCalledWith('/samples');
+  });
+
+  it('resets backend conversation context', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(resetAgentConversation()).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith('/agent/conversation', { method: 'DELETE' });
   });
 
   it('answers a paused run with transient provider headers', async () => {

@@ -130,6 +130,9 @@ class SessionConversation:
         record.change_id = change_id
         self._trim()
 
+    def clear(self) -> None:
+        self._records.clear()
+
     def model_context(self) -> list[dict[str, object]]:
         """Return oldest-to-newest completed or paused records under the byte budget."""
 

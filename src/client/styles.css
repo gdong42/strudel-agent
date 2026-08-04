@@ -138,7 +138,8 @@ aside {
 .agent-panel-header { align-items: center; display: grid; gap: 8px; grid-template-columns: auto minmax(0, 1fr) auto; }
 .agent-panel-header h2 { flex: none; }
 .agent-panel-header .provider-summary { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.snapshot-trigger { font-size: 11px; padding: 5px 7px; white-space: nowrap; }
+.agent-panel-actions { align-items: center; display: flex; gap: 6px; }
+.agent-header-action, .snapshot-trigger { font-size: 11px; padding: 5px 7px; white-space: nowrap; }
 .snapshot-trigger span { color: #f1d27a; font-variant-numeric: tabular-nums; margin-left: 3px; }
 .agent-transcript { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; scrollbar-gutter: stable; }
 .agent-turn-history { display: grid; gap: 16px; }
@@ -171,7 +172,7 @@ aside {
 .agent-activity-item[data-kind="commentary"] { color: #d7dde0; }
 .agent-activity-item[data-kind="commentary"] .agent-activity-marker { background: #78b8a5; }
 .agent-activity-copy { display: grid; gap: 1px; min-width: 0; }
-.agent-activity-copy code { color: #82939f; font-size: 10px; overflow-wrap: anywhere; }
+.agent-activity-copy > code { color: #82939f; font-size: 10px; overflow-wrap: anywhere; }
 .agent-activity-duration { color: #6f7a82; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 @keyframes agent-activity-pulse { 50% { opacity: 0.35; } }
 .agent-question { border-top: 1px solid #2d3338; margin-top: 10px; padding-top: 10px; }
@@ -184,7 +185,29 @@ aside {
 .agent-question-option strong { color: #e0e5e9; font-weight: 600; }
 #agent-question-answer { margin-top: 8px; }
 .agent-question-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
-#agent-explanation { color: #b8c0c7; font-size: 12px; margin-top: 10px; }
+#agent-explanation { color: #c3cbd1; font-size: 12px; margin-top: 10px; }
+.markdown-content { line-height: 1.55; min-width: 0; overflow-wrap: anywhere; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content p { margin: 0 0 8px; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 { color: #edf0f2; font-size: 13px; font-weight: 650; line-height: 1.35; margin: 12px 0 6px; }
+.markdown-content h1 { font-size: 15px; }
+.markdown-content h2 { font-size: 14px; }
+.markdown-content ul, .markdown-content ol { margin: 6px 0 9px; padding-left: 20px; }
+.markdown-content li { margin: 3px 0; }
+.markdown-content blockquote { border-left: 2px solid #5f9ea0; color: #aeb8bf; margin: 8px 0; padding-left: 9px; }
+.markdown-content code { background: #101214; border: 1px solid #30373d; border-radius: 3px; color: #dce7dd; font: 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 4px; }
+.markdown-content pre { background: #101214; border: 1px solid #30373d; border-radius: 4px; margin: 8px 0; max-width: 100%; overflow-x: auto; padding: 8px 10px; }
+.markdown-content pre code { background: transparent; border: 0; border-radius: 0; display: block; padding: 0; white-space: pre; }
+.markdown-content a { color: #83c7b4; text-decoration: underline; text-underline-offset: 2px; }
+.markdown-content hr { border: 0; border-top: 1px solid #343b40; margin: 10px 0; }
+.markdown-content table { border-collapse: collapse; display: block; margin: 8px 0; max-width: 100%; overflow-x: auto; }
+.markdown-content th, .markdown-content td { border: 1px solid #343b40; padding: 4px 7px; text-align: left; }
+.markdown-content th { color: #e1e6e9; font-weight: 600; }
+.markdown-content-compact { font-size: 12px; line-height: 1.45; }
+.markdown-content-compact p { margin-bottom: 4px; }
+.markdown-content-compact ul, .markdown-content-compact ol { margin: 3px 0 5px; }
+.markdown-content-compact pre { margin: 4px 0; }
 .agent-warning { border-left: 3px solid #f1d27a; margin: 6px 0; padding-left: 7px; font-size: 12px; }
 .warning-risk { border-color: #ff7272; color: #ff9b9b; }
 .diff-view { max-height: 210px; overflow: auto; border: 1px solid #2d3338; background: #101214; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }

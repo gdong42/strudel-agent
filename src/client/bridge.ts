@@ -365,6 +365,13 @@ export async function fetchAgentSettings(): Promise<AgentSettingsPayload> {
   return response.json() as Promise<AgentSettingsPayload>;
 }
 
+export async function resetAgentConversation(): Promise<void> {
+  const response = await fetch('/agent/conversation', { method: 'DELETE' });
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Failed to reset Agent context: ${response.status}`));
+  }
+}
+
 export async function testAgentProvider(connection: AgentConnection): Promise<{ ok: boolean; message: string }> {
   const response = await fetch('/agent/providers/test', {
     method: 'POST',

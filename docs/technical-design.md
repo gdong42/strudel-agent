@@ -359,18 +359,21 @@ Only public boundary states cross into the user-facing workflow:
 - `cancelled`: keep editor and playback unchanged.
 
 Normal candidate failures, scope violations, tool errors that can be repaired,
-and self-review notes remain internal. Hidden model reasoning is neither
-requested nor persisted.
+and self-review notes remain internal. Hidden model reasoning is never exposed;
+provider-required reasoning history may remain in private Run memory but is not
+durably persisted.
 
 While a Run is active, a separate read-only activity timeline makes waiting
 observable without turning intermediate work into user decisions. It may show
 model-turn state, elapsed time, turn number, editor-context updates, user-input
 resumption, allowlisted tool names, and one bounded public-commentary entry per
 model turn. Commentary is the only model prose allowed here: the system prompt
-defines it as short, high-level, plain-text progress and the server normalizes
-and limits it. Candidate code, reasoning, tool arguments/results, and raw
-provider payloads remain private. Activity does not change the Run lifecycle or
-staging boundary.
+defines it as short, high-level progress and the server normalizes and limits
+it. The client renders commentary and final explanations as sanitized Markdown;
+raw HTML, executable content, unsafe links, images, and embedded media are not
+allowed. Candidate code, reasoning, tool arguments/results, and raw provider
+payloads remain private. Activity does not change the Run lifecycle or staging
+boundary.
 
 Cancellation is cooperative: the active provider task is cancelled and awaited
 before the Run becomes `cancelled`. Cancellation wins over a concurrently
@@ -438,8 +441,10 @@ are operational bounds to tune with evaluation data, not musical constraints.
 
 The ledger lives only for the lifetime of the local backend process. It survives
 a browser reload while that process remains available, but it is not written to
-browser storage and is cleared on server restart. A future explicit "clear
-conversation" action must clear this ledger before a new Run starts.
+browser storage and is cleared on server restart. `DELETE /agent/conversation`
+and the workspace's `Reset context` action clear this ledger before a new Run
+starts. The action is unavailable while a Run is active and does not alter code,
+snapshots, changes, or audit records.
 
 When a new Run starts, the runtime adds a snapshot of the recent eligible
 records to its initial private model context, followed by the new intent and
@@ -575,6 +580,7 @@ editing.
 |---|---|
 | `client/repl.ts` | `strudel-editor` adapter (see §4) |
 | `client/agent.ts` | Intent, public activity timeline, clarification, and Manual/Auto Fire UI |
+| `client/markdown.ts` | Sanitized Markdown rendering for public Agent prose |
 | `client/diff.ts` | Diff computation and inline/side-by-side rendering |
 | `client/state.ts` | Client-side state machine (§5), transition guards |
 | `client/recovery.ts` | Revert to `lastGoodCode`, error display, panic handler |

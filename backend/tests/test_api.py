@@ -185,6 +185,42 @@ def test_agent_settings_exposes_defaults_without_secrets(project_paths: dict[str
     }
 
 
+def test_reset_agent_conversation_calls_the_run_manager(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ConversationManager:
+        cleared = False
+
+        async def clear_conversation(self) -> None:
+            self.cleared = True
+
+    manager = ConversationManager()
+    monkeypatch.setattr(main, "agent_runs", manager)
+    client = TestClient(app)
+
+    response = client.delete("/agent/conversation")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert manager.cleared is True
+
+
+def test_reset_agent_conversation_rejects_an_active_run(
+    project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ActiveConversationManager:
+        async def clear_conversation(self) -> None:
+            raise main.AgentRuntimeTransitionError("Conversation context cannot be reset while an Agent Run is active")
+
+    monkeypatch.setattr(main, "agent_runs", ActiveConversationManager())
+    client = TestClient(app)
+
+    response = client.delete("/agent/conversation")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Conversation context cannot be reset while an Agent Run is active"
+
+
 def test_start_agent_run_snapshots_browser_runtime_limits(
     project_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
