@@ -192,6 +192,7 @@ test('sample panel renders declared project sounds without treating them as play
           { name: 'house_kick', tags: ['drum', 'kick'], description: 'Dry kick.' },
           { name: 'house_hat', tags: ['drum', 'hat'], description: null },
         ],
+        library: { configured: false, soundCount: 0, fileCount: 0, mapUrl: null },
       },
     });
   });
@@ -202,6 +203,43 @@ test('sample panel renders declared project sounds without treating them as play
   await expect(page.locator('#sample-list')).toContainText('drum');
   await expect(page.locator('#sample-list')).toContainText('Dry kick.');
   await expect(page.locator('#sample-list')).not.toContainText('loaded');
+});
+
+test('workspace sample library map is registered during startup', async ({ page }) => {
+  let mapRequests = 0;
+  await page.route('**/samples', async (route) => {
+    await route.fulfill({
+      json: {
+        configured: true,
+        samples: [
+          { name: 'kick', tags: [], description: '2 local sample files.' },
+          { name: 'vocal', tags: [], description: '1 local sample file.' },
+        ],
+        library: {
+          configured: true,
+          soundCount: 2,
+          fileCount: 3,
+          mapUrl: '/sample-library/strudel.json?v=test',
+        },
+      },
+    });
+  });
+  await page.route('**/sample-library/strudel.json?v=test', async (route) => {
+    mapRequests += 1;
+    await route.fulfill({
+      json: {
+        _base: '/sample-library/files/',
+        kick: ['kick/deep.wav', 'kick/punch.wav'],
+        vocal: ['vocal.wav'],
+      },
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.locator('#sample-list')).toContainText('2 local sounds · 3 files');
+  await expect(page.locator('#sample-list')).toContainText('kick');
+  await expect.poll(() => mapRequests).toBe(1);
 });
 
 test('panic calls stop and reports panic status', async ({ page }) => {

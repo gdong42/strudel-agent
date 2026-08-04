@@ -173,6 +173,8 @@ Workspace
   ├─ snapshots/
   ├─ changes/
   ├─ samples/
+  │  ├─ library/        local audio served and registered automatically
+  │  └─ registry.json   optional tags and external sample declarations
   ├─ project.config.json
   └─ agent-context.md
 ```

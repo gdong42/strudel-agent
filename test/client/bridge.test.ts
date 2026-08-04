@@ -86,6 +86,7 @@ describe('Agent Run bridge', () => {
     const catalog = {
       configured: true,
       samples: [{ name: 'house_kick', tags: ['drum', 'kick'], description: 'Dry kick.' }],
+      library: { configured: false, soundCount: 0, fileCount: 0, mapUrl: null },
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(catalog));
     vi.stubGlobal('fetch', fetchMock);

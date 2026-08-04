@@ -619,7 +619,9 @@ POST /changes/:id/undo           Undo a staged change (restore preAgentCode)
 GET  /snapshots                  List snapshots
 POST /snapshots                  Create snapshot after successful evaluate
 POST /snapshots/:id/revert       Revert to a snapshot
-GET  /samples                    List declared project samples (not live load state)
+GET  /samples                    List declared and discovered project samples
+GET  /sample-library/strudel.json Generate the local Strudel sample map
+GET  /sample-library/files/:path Serve a project-confined local audio file
 ```
 
 ## 9. File Layout (Revisited)
@@ -674,6 +676,8 @@ GET  /samples                    List declared project samples (not live load st
 ├── changes/
 ├── audits/
 ├── samples/
+│   ├── library/                 # local audio grouped by sound name
+│   └── registry.json            # optional metadata and external declarations
 ├── project.config.json
 ├── agent-context.example.md
 ├── agent-context.md             # optional project conventions
@@ -710,7 +714,8 @@ GET  /samples                    List declared project samples (not live load st
     }
   },
   "samples": {
-    "registryPath": "samples/"
+    "registryPath": "samples/",
+    "libraryPath": "samples/library/"
   },
   "server": {
     "host": "127.0.0.1",
@@ -734,14 +739,31 @@ binding. Browser-local settings remain the source for a user's API key and
 temporary provider/model/runtime override.
 
 `samples.registryPath` names a project-relative directory containing optional
-`registry.json`. The registry contains declared Strudel sound names, tags, and
-short descriptions. It is neither a sample downloader nor a claim that browser
-audio has already loaded a name. The runtime rejects paths that escape the
-project root, including through a symlink. An absent registry is an empty,
-unconfigured catalog rather than an error.
+`registry.json`. The registry contains manually declared Strudel sound names,
+tags, and short descriptions. It may describe external maps loaded explicitly
+by track code, so declaration alone is not proof that browser audio is loaded.
 
-The local `GET /samples` endpoint and workspace Samples panel expose the same
-declared catalog without returning filesystem paths. The internal
+`samples.libraryPath` names a project-relative audio directory served by the
+local backend. Each immediate subdirectory is a Strudel sound name and its
+supported audio files are variants ordered by stable relative path. A supported
+audio file at the library root becomes a single-variant sound named after its
+stem. The backend generates a `strudel.json`-compatible map, serves only mapped
+audio below the resolved library root, and rejects path traversal, symlinks,
+invalid sound names, and non-audio files. Both configured paths must remain
+inside the project root.
+
+After the embedded REPL is ready, the client registers the generated map before
+the user evaluates project code. Strudel still lazily decodes audio on first
+use. The map URL carries a content fingerprint so a page reload observes added,
+removed, or renamed files without relying on a stale browser map cache. A map
+load failure does not prevent editor startup, but the Samples panel and status
+surface that the local library is unavailable.
+
+The local `GET /samples` endpoint and workspace Samples panel expose the merged
+catalog without returning filesystem paths. Discovered library names are
+automatically declared; matching `registry.json` entries enrich them with tags
+and descriptions, while registry-only entries remain valid for external maps.
+The internal
 `lookup_samples` tool searches that catalog. The internal `inspect_sample_usage`
 tool compares direct `s()`/`sound()` names in a base and candidate, reporting
 only names newly introduced by the candidate and whether they are declared. It

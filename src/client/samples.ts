@@ -3,14 +3,13 @@ import type { SampleListPayload } from './bridge';
 export class SampleListView {
   constructor(private readonly element: HTMLElement) {}
 
-  render(catalog: SampleListPayload): void {
+  render(catalog: SampleListPayload, loadError = false): void {
     this.element.replaceChildren();
+    this.element.append(this.libraryStatus(catalog, loadError));
     if (!catalog.configured) {
-      this.element.textContent = 'No sample registry.';
       return;
     }
     if (catalog.samples.length === 0) {
-      this.element.textContent = 'No declared samples.';
       return;
     }
 
@@ -48,6 +47,25 @@ export class SampleListView {
 
   renderUnavailable(): void {
     this.element.replaceChildren();
-    this.element.textContent = 'Sample registry unavailable.';
+    this.element.textContent = 'Sample catalog unavailable.';
+  }
+
+  private libraryStatus(catalog: SampleListPayload, loadError: boolean): HTMLElement {
+    const status = document.createElement('p');
+    status.className = `sample-library-status${loadError ? ' sample-library-error' : ''}`;
+    if (loadError) {
+      status.textContent = 'Local samples failed to load.';
+    } else if (catalog.library.fileCount > 0) {
+      const soundUnit = catalog.library.soundCount === 1 ? 'sound' : 'sounds';
+      const fileUnit = catalog.library.fileCount === 1 ? 'file' : 'files';
+      status.textContent = `${catalog.library.soundCount} local ${soundUnit} · ${catalog.library.fileCount} ${fileUnit}`;
+    } else if (catalog.library.configured) {
+      status.textContent = 'Local sample library is empty.';
+    } else if (catalog.configured) {
+      status.textContent = 'Declared samples only.';
+    } else {
+      status.textContent = 'No custom samples.';
+    }
+    return status;
   }
 }

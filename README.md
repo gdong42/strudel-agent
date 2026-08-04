@@ -24,7 +24,11 @@ Start the backend:
 
 ```bash
 cd backend
-UV_CACHE_DIR=../.uv-cache uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
+UV_CACHE_DIR=../.uv-cache uv run uvicorn app.main:app \
+  --host 127.0.0.1 \
+  --port 8787 \
+  --reload \
+  --timeout-graceful-shutdown 2
 ```
 
 For local Provider payload diagnostics, add `--log-level debug`. Streaming
@@ -43,6 +47,21 @@ Open:
 ```text
 http://127.0.0.1:5173/
 ```
+
+### Local Samples
+
+Put audio in subdirectories under `samples/library/`; each subdirectory becomes
+a Strudel sound name and its files become zero-based variants:
+
+```text
+samples/library/kick/deep.wav
+samples/library/kick/punch.wav
+samples/library/vocal.wav
+```
+
+Refresh the page, then use `s("kick:0 kick:1 vocal")`. The backend generates and
+serves the sample map locally; no separate sample server or `samples(...)` line
+is required. See `samples/README.md` for supported formats and optional metadata.
 
 ## Strudel Knowledge
 

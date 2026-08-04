@@ -752,10 +752,8 @@ async function boot(): Promise<void> {
   const settingsReady = settingsPanel.initialize().catch(() => {
     status.set('Agent settings unavailable. REPL controls remain available.', 'warn');
   });
-  const samplesReady = fetchSamples()
-    .then((catalog) => sampleList.render(catalog))
-    .catch(() => sampleList.renderUnavailable());
-  const [serverState, snapshots] = await Promise.all([
+  const samplesReady = fetchSamples().catch(() => null);
+  const [serverState, snapshots, , sampleCatalog] = await Promise.all([
     fetchState(),
     fetchSnapshots(),
     settingsReady,
@@ -773,6 +771,20 @@ async function boot(): Promise<void> {
   });
 
   repl = await createReplAdapter(replElement);
+  if (sampleCatalog) {
+    try {
+      if (sampleCatalog.library.mapUrl) {
+        await repl.registerSamples(sampleCatalog.library.mapUrl);
+      }
+      sampleList.render(sampleCatalog);
+    } catch (error) {
+      console.error('Could not register the local sample library.', error);
+      sampleList.render(sampleCatalog, true);
+      status.set('Local samples could not be loaded. Editor remains available.', 'warn');
+    }
+  } else {
+    sampleList.renderUnavailable();
+  }
   repl.onUpdate((code) => {
     if (!applyingRemoteCode) {
       state?.setEditorCode(code);

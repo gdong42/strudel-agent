@@ -17,7 +17,8 @@
     }
   },
   "samples": {
-    "registryPath": "samples"
+    "registryPath": "samples",
+    "libraryPath": "samples/library"
   },
   "server": {
     "host": "127.0.0.1",

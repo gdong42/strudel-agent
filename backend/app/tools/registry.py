@@ -177,7 +177,7 @@ class ToolRegistry:
             ),
             "lookup_samples": ToolDefinition(
                 name="lookup_samples",
-                description="List project-declared sound names from the optional local sample registry. Use an empty query and tag list to list the first matching names.",
+                description="List sound names available from the project sample catalog, including discovered local audio and optional metadata. Use an empty query and tag list to list the first matching names.",
                 inputSchema={
                     "type": "object",
                     "additionalProperties": False,
@@ -191,7 +191,7 @@ class ToolRegistry:
             ),
             "inspect_sample_usage": ToolDefinition(
                 name="inspect_sample_usage",
-                description="Compare direct s()/sound() names in base and candidate code against the project sample registry. It reports only newly introduced undeclared names.",
+                description="Compare direct s()/sound() names in base and candidate code against the project sample catalog. It reports only newly introduced unavailable names.",
                 inputSchema={
                     "type": "object",
                     "additionalProperties": False,

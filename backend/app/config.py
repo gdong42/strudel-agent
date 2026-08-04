@@ -33,6 +33,7 @@ class AgentConfig(BaseModel):
 
 class SampleConfig(BaseModel):
     registry_path: str = Field(default="samples", alias="registryPath")
+    library_path: str = Field(default="samples/library", alias="libraryPath")
 
 
 class ServerConfig(BaseModel):

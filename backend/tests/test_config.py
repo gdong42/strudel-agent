@@ -16,6 +16,8 @@ def test_repository_defaults_to_deepseek_v4_flash() -> None:
     assert config.agent.runtime.max_total_tokens == 4_000_000
     assert config.agent.runtime.max_output_tokens_per_turn == 65_536
     assert config.agent.context_file == "agent-context.md"
+    assert config.samples.registry_path == "samples"
+    assert config.samples.library_path == "samples/library"
 
 
 def test_load_config_defaults_when_file_missing(tmp_path: Path, monkeypatch) -> None:
@@ -49,6 +51,10 @@ def test_load_config_reads_project_config(tmp_path: Path, monkeypatch) -> None:
             "directory": "history",
             "maxCount": 3,
             "maxAgeHours": 2
+          },
+          "samples": {
+            "registryPath": "audio",
+            "libraryPath": "audio/library"
           }
         }
         """,
@@ -66,6 +72,8 @@ def test_load_config_reads_project_config(tmp_path: Path, monkeypatch) -> None:
     assert config.agent.runtime.max_total_tokens == 900
     assert config.agent.runtime.max_output_tokens_per_turn == 256
     assert config.agent.context_file == "set/context.md"
+    assert config.samples.registry_path == "audio"
+    assert config.samples.library_path == "audio/library"
     assert track_path() == tmp_path / "tracks" / "live.strudel.js"
     assert snapshots_dir() == tmp_path / "history"
 

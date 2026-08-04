@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
         '/events': backend,
         '/snapshots': backend,
         '/samples': backend,
+        '/sample-library': backend,
         '/state': backend,
         '/track': backend,
       },

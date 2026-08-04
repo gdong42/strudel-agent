@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.models import ToolCall
-from app.samples import DeclaredSample, LoadedSampleRegistry, SampleRegistry, SampleRegistryError
+from app.samples import DeclaredSample, LoadedSampleRegistry, SampleLibraryInfo, SampleRegistry, SampleRegistryError
 from app.strudel_docs import StrudelDocsError
 from app.strudel_validation import StrudelValidatorUnavailable
 from app.tools import ToolRegistry
@@ -17,6 +17,7 @@ def configured_sample_registry() -> LoadedSampleRegistry:
                 DeclaredSample(name="house_hat", tags=["drum", "hat", "house"]),
             ],
         ),
+        library=SampleLibraryInfo(configured=False, soundCount=0, fileCount=0),
     )
 
 
@@ -194,7 +195,11 @@ def test_inspect_sample_usage_reports_only_new_undeclared_direct_sound_names() -
 
 def test_inspect_sample_usage_remains_non_blocking_when_no_registry_is_configured() -> None:
     registry = ToolRegistry(
-        sample_registry_loader=lambda: LoadedSampleRegistry(configured=False, registry=SampleRegistry(version=1))
+        sample_registry_loader=lambda: LoadedSampleRegistry(
+            configured=False,
+            registry=SampleRegistry(version=1),
+            library=SampleLibraryInfo(configured=False, soundCount=0, fileCount=0),
+        )
     )
 
     result = registry.execute(

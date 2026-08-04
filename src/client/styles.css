@@ -275,6 +275,14 @@ code {
   font-size: 12px;
 }
 
+.sample-library-status {
+  color: #8f9aa3;
+  font-size: 11px;
+  margin: 0;
+}
+
+.sample-library-error { color: #ff9b9b; }
+
 .sample-item {
   border-top: 1px solid #2d3338;
   padding-top: 7px;

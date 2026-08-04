@@ -81,7 +81,11 @@ def test_get_samples_returns_an_empty_catalog_when_no_registry_is_configured(pro
     response = client.get("/samples")
 
     assert response.status_code == 200
-    assert response.json() == {"configured": False, "samples": []}
+    assert response.json() == {
+        "configured": False,
+        "samples": [],
+        "library": {"configured": False, "soundCount": 0, "fileCount": 0, "mapUrl": None},
+    }
 
 
 def test_get_samples_returns_declared_project_sounds(project_paths: dict[str, Path]) -> None:
@@ -111,7 +115,47 @@ def test_get_samples_returns_declared_project_sounds(project_paths: dict[str, Pa
             {"name": "house_hat", "tags": ["drum", "hat"], "description": None},
             {"name": "house_kick", "tags": ["drum", "kick"], "description": "Dry kick."},
         ],
+        "library": {"configured": False, "soundCount": 0, "fileCount": 0, "mapUrl": None},
     }
+
+
+def test_local_sample_library_is_listed_mapped_and_served(project_paths: dict[str, Path]) -> None:
+    root = project_paths["track_path"].parent.parent
+    library = root / "samples" / "library" / "kick"
+    library.mkdir(parents=True)
+    sample = library / "deep.wav"
+    sample.write_bytes(b"RIFF-local-sample")
+    client = TestClient(app)
+
+    catalog = client.get("/samples")
+    mapped = client.get("/sample-library/strudel.json")
+    audio = client.get("/sample-library/files/kick/deep.wav")
+
+    assert catalog.status_code == 200
+    assert catalog.json()["samples"] == [
+        {"name": "kick", "tags": [], "description": "1 local sample file."}
+    ]
+    assert catalog.json()["library"]["configured"] is True
+    assert catalog.json()["library"]["soundCount"] == 1
+    assert catalog.json()["library"]["fileCount"] == 1
+    assert catalog.json()["library"]["mapUrl"].startswith("/sample-library/strudel.json?v=")
+    assert mapped.status_code == 200
+    assert mapped.headers["cache-control"] == "no-store"
+    assert mapped.json() == {"_base": "/sample-library/files/", "kick": ["kick/deep.wav"]}
+    assert audio.status_code == 200
+    assert audio.content == b"RIFF-local-sample"
+
+
+def test_local_sample_file_route_rejects_unmapped_files(project_paths: dict[str, Path]) -> None:
+    root = project_paths["track_path"].parent.parent
+    library = root / "samples" / "library"
+    library.mkdir(parents=True)
+    (library / "secret.txt").write_text("secret", encoding="utf-8")
+    client = TestClient(app)
+
+    response = client.get("/sample-library/files/secret.txt")
+
+    assert response.status_code == 404
 
 
 def test_get_samples_reports_an_invalid_registry_without_exposing_a_path(project_paths: dict[str, Path]) -> None:

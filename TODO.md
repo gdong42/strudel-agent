@@ -145,6 +145,10 @@ workflow.
 - [x] **P5.1.1** Define a versioned local sample registry and project-confined loader
 - [x] **P5.1.2** Expose declared samples through a deterministic Agent lookup/validation tool
 - [x] **P5.1.3** Surface declared samples through the local API and workspace UI
+- [x] **P5.1.4** Scan a project-confined `samples/library/` and generate a deterministic Strudel sample map
+- [x] **P5.1.5** Serve mapped audio files from the local backend with traversal and symlink protection
+- [x] **P5.1.6** Register the workspace sample map during REPL startup and report readiness in the Samples panel
+- [x] **P5.1.7** Merge discovered local sound names into the Agent sample catalog and cover the full browser flow
 - [x] **P5.2** Upgrade heuristic candidate checks with pinned JavaScript and Strudel Mini Notation parsers
 - [ ] **P5.3** Add richer visual and structural diff inspection tools for the agent's self-review
 - [ ] **P5.6** Add visual disable toggle and browser performance logging for audio-critical performance

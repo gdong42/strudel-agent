@@ -1,5 +1,10 @@
 type StrudelMirror = {
   code: string;
+  prebaked?: Promise<unknown>;
+  repl?: {
+    evaluate(code: string, autostart?: boolean, shouldHush?: boolean): Promise<unknown>;
+    state: { evalError?: unknown };
+  };
   setCode(code: string): void;
   evaluate(): Promise<void>;
   stop(): Promise<void> | void;
@@ -23,6 +28,7 @@ export interface ReplAdapter {
   getCode(): string;
   setCode(code: string): void;
   evaluate(): Promise<void>;
+  registerSamples(mapUrl: string): Promise<void>;
   stop(): Promise<void>;
   getCursor(): { offset: number };
   getSelection(): string;
@@ -49,6 +55,21 @@ export async function createReplAdapter(element: StrudelEditorElement): Promise<
       editor.setCode(code);
     },
     evaluate: () => editor.evaluate(),
+    async registerSamples(mapUrl: string) {
+      if (import.meta.env.VITE_STRUDEL_REPL_MOCK === '1') {
+        const response = await fetch(mapUrl);
+        if (!response.ok) throw new Error(`Sample map returned ${response.status}`);
+        return;
+      }
+      if (!editor.repl) {
+        throw new Error('Strudel runtime is unavailable');
+      }
+      await editor.prebaked;
+      await editor.repl.evaluate(`samples(${toJavaScriptStringLiteral(mapUrl)})`, false, false);
+      if (editor.repl.state.evalError) {
+        throw editor.repl.state.evalError;
+      }
+    },
     async stop() {
       await editor.stop();
     },
@@ -71,6 +92,11 @@ export async function createReplAdapter(element: StrudelEditorElement): Promise<
       updateCallbacks.add(callback);
     },
   };
+}
+
+export function toJavaScriptStringLiteral(value: string): string {
+  const jsonEscaped = JSON.stringify(value).slice(1, -1).replaceAll("'", "\\'");
+  return `'${jsonEscaped}'`;
 }
 
 async function loadStrudelRepl(): Promise<void> {

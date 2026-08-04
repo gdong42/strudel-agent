@@ -40,6 +40,12 @@ export interface DeclaredSample {
 export interface SampleListPayload {
   configured: boolean;
   samples: DeclaredSample[];
+  library: {
+    configured: boolean;
+    soundCount: number;
+    fileCount: number;
+    mapUrl: string | null;
+  };
 }
 
 export type ApplyMode = 'manual' | 'auto';

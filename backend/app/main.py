@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from .agent import AgentConfigurationError, create_agent_service, list_provider_info
 from .agent_runs import AgentRunManager
@@ -39,7 +39,15 @@ from .models import (
 from .providers.base import ProviderError
 from .project_context import ProjectContextError, load_project_context
 from .run_audit import AgentAuditLog
-from .samples import SampleListResponse, SampleRegistryError, declared_samples, load_sample_registry
+from .samples import (
+    SampleListResponse,
+    SampleRegistryError,
+    declared_samples,
+    load_sample_library,
+    load_sample_registry,
+    resolve_sample_file,
+    sample_map,
+)
 from .snapshots import create_snapshot, latest_snapshot, list_snapshots, read_snapshot
 from .tracks import read_track, write_track
 
@@ -150,9 +158,30 @@ async def get_samples() -> dict[str, Any]:
         registry = load_sample_registry()
     except SampleRegistryError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return SampleListResponse(configured=registry.configured, samples=declared_samples(registry)).model_dump(
-        by_alias=True
-    )
+    return SampleListResponse(
+        configured=registry.configured,
+        samples=declared_samples(registry),
+        library=registry.library,
+    ).model_dump(by_alias=True)
+
+
+@app.get("/sample-library/strudel.json")
+async def get_sample_map() -> JSONResponse:
+    try:
+        library = load_sample_library()
+    except SampleRegistryError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return JSONResponse(sample_map(library), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/sample-library/files/{sample_path:path}")
+async def get_sample_file(sample_path: str) -> FileResponse:
+    try:
+        library = load_sample_library()
+        path = resolve_sample_file(sample_path, library)
+    except SampleRegistryError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/agent/settings")
