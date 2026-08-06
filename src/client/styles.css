@@ -6,8 +6,8 @@
   -webkit-font-smoothing: antialiased;
   background: #121313;
   color: #e7e4df;
-  --font-ui: "IBM Plex Sans Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  --font-ui: "Mona Sans Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Monaspace Neon", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   --radius-control: 3px;
   --radius-surface: 3px;
   --radius-dialog: 3px;
