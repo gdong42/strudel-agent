@@ -1,5 +1,19 @@
 # Third-Party Notices
 
+## Strudel
+
+Strudel Agent includes the following direct Strudel dependencies and their
+transitive Strudel modules:
+
+- `@strudel/repl` 1.3.0
+- `@strudel/mini` 1.2.6
+
+Strudel is developed by Felix Roos, Alex McLean, and other contributors. Its
+source code is available from
+[codeberg.org/uzu/strudel](https://codeberg.org/uzu/strudel). The included
+packages are licensed under the GNU Affero General Public License, version 3
+or later. The complete license text is provided in [LICENSE](LICENSE).
+
 ## Mona Sans
 
 Copyright 2022 The Mona Sans Project Authors

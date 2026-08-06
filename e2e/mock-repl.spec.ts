@@ -1024,6 +1024,15 @@ test('agent settings use backend defaults and persist browser overrides', async 
   await expect(page.locator('#settings-provider')).toContainText('Backend default (mock)');
   await expect(page.locator('#settings-provider')).toContainText('DeepSeek');
   await expect(page.locator('#settings-provider')).toContainText('Kimi');
+  await expect(page.locator('.settings-legal')).toContainText('Copyright (C) 2026 Gan Dong');
+  await expect(page.getByRole('link', { name: 'Source code' })).toHaveAttribute(
+    'href',
+    'https://github.com/gdong42/strudel-agent',
+  );
+  await expect(page.getByRole('link', { name: 'License' })).toHaveAttribute(
+    'href',
+    'https://github.com/gdong42/strudel-agent/blob/main/LICENSE',
+  );
   await page.locator('#settings-provider').selectOption('openai');
   await expect(page.locator('#settings-api-key')).toBeEnabled();
   await expect(page.locator('#settings-model')).toHaveAttribute('placeholder', 'Default: gpt-5.6-terra');

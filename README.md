@@ -87,3 +87,17 @@ npm test
 cd backend && UV_CACHE_DIR=../.uv-cache uv run pytest
 npm run test:e2e:mock
 ```
+
+## License
+
+Copyright (C) 2026 Gan Dong.
+
+Strudel Agent is free software licensed under the
+[GNU Affero General Public License, version 3 or later](LICENSE). It is
+provided without warranty. Users interacting with a hosted version can find
+the corresponding source code at
+[github.com/gdong42/strudel-agent](https://github.com/gdong42/strudel-agent).
+
+The application includes Strudel packages under the same license. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party attribution
+and additional license notices.
