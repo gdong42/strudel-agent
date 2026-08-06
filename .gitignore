@@ -11,6 +11,8 @@ snapshots/*.json
 changes/*.json
 audits/*.json
 evals/results/*.json
+samples/library/**
+!samples/library/.gitkeep
 .e2e-workspace/
 test-results/
 playwright-report/

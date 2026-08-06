@@ -1,3 +1,6 @@
+import '@fontsource-variable/ibm-plex-sans/wght.css';
+import '@fontsource/ibm-plex-mono/latin-400.css';
+import '@fontsource/ibm-plex-mono/latin-500.css';
 import {
   acknowledgeAgentRunStage,
   answerAgentRun,
@@ -22,6 +25,20 @@ import {
   type TrackPayload,
 } from './bridge';
 import {
+  AudioWaveform,
+  createIcons,
+  History,
+  OctagonAlert,
+  Play,
+  RefreshCcw,
+  RotateCcw,
+  Send,
+  Settings,
+  Square,
+  Undo2,
+  X,
+} from 'lucide';
+import {
   clearActiveAgentRun,
   loadActiveAgentRun,
   saveActiveAgentRun,
@@ -38,6 +55,26 @@ import { SettingsPanel } from './settings';
 import { RuntimeStateStore, type StagedAgentChange } from './state';
 import { StatusView } from './status';
 import './styles.css';
+
+createIcons({
+  icons: {
+    AudioWaveform,
+    History,
+    OctagonAlert,
+    Play,
+    RefreshCcw,
+    RotateCcw,
+    Send,
+    Settings,
+    Square,
+    Undo2,
+    X,
+  },
+  attrs: {
+    'aria-hidden': 'true',
+    'stroke-width': 1.8,
+  },
+});
 
 let repl: ReplAdapter | null = null;
 let state: RuntimeStateStore | null = null;

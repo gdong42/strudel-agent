@@ -114,6 +114,7 @@ export class SnapshotListView {
 
     const button = document.createElement('button');
     button.type = 'button';
+    button.className = 'button-secondary';
     button.textContent = 'Revert';
     button.title = `Revert to ${createdAt.toLocaleString()}`;
     button.addEventListener('click', () => { void onRevert(snapshot.id); });

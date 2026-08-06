@@ -5,6 +5,9 @@ type StrudelMirror = {
     evaluate(code: string, autostart?: boolean, shouldHush?: boolean): Promise<unknown>;
     state: { evalError?: unknown };
   };
+  setTheme?(theme: string): void;
+  setBracketMatchingEnabled?(enabled: boolean): void;
+  reconfigureExtension?(key: string, value: unknown): void;
   setCode(code: string): void;
   evaluate(): Promise<void>;
   stop(): Promise<void> | void;
@@ -24,6 +27,8 @@ type StrudelEditorElement = HTMLElement & {
   editor?: StrudelMirror;
 };
 
+export const DEFAULT_EDITOR_THEME = 'materialDark';
+
 export interface ReplAdapter {
   getCode(): string;
   setCode(code: string): void;
@@ -40,6 +45,7 @@ export interface ReplAdapter {
 export async function createReplAdapter(element: StrudelEditorElement): Promise<ReplAdapter> {
   await loadStrudelRepl();
   const editor = await waitForEditor(element);
+  configureEditorAppearance(editor);
   let cleanCode = editor.code;
   const updateCallbacks = new Set<(code: string) => void>();
 
@@ -92,6 +98,14 @@ export async function createReplAdapter(element: StrudelEditorElement): Promise<
       updateCallbacks.add(callback);
     },
   };
+}
+
+export function configureEditorAppearance(
+  editor: Pick<StrudelMirror, 'setTheme' | 'setBracketMatchingEnabled' | 'reconfigureExtension'>,
+): void {
+  editor.setTheme?.(DEFAULT_EDITOR_THEME);
+  editor.setBracketMatchingEnabled?.(true);
+  editor.reconfigureExtension?.('isActiveLineHighlighted', true);
 }
 
 export function toJavaScriptStringLiteral(value: string): string {

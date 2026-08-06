@@ -7,18 +7,22 @@
   </head>
   <body>
     <header class="app-header">
-      <div>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i data-lucide="audio-waveform"></i></span>
         <h1>Strudel Agent</h1>
-        <p>Local runtime shell for Strudel live vibe coding.</p>
       </div>
       <div class="controls" aria-label="Playback controls">
-        <button id="evaluate" type="button">Evaluate</button>
-        <button id="revert-last-good" type="button" disabled>Revert</button>
-        <button id="stop" type="button">Stop</button>
-        <button id="panic" type="button">Panic</button>
-        <button id="open-settings" type="button">Settings</button>
+        <button id="evaluate" class="control-primary" type="button"><i data-lucide="play"></i><span>Evaluate</span></button>
+        <button id="revert-last-good" class="icon-button" type="button" aria-label="Revert" title="Revert to last good version" disabled><i data-lucide="rotate-ccw"></i></button>
+        <button id="stop" class="icon-button" type="button" aria-label="Stop" title="Stop playback"><i data-lucide="square"></i></button>
+        <button id="panic" class="icon-button control-danger" type="button" aria-label="Panic" title="Panic stop"><i data-lucide="octagon-alert"></i></button>
+        <span class="control-divider" aria-hidden="true"></span>
+        <button id="open-settings" class="icon-button" type="button" aria-label="Settings" title="Agent settings"><i data-lucide="settings"></i></button>
       </div>
-      <div id="status" class="status" data-status="warn">Starting...</div>
+      <div class="status-shell">
+        <span class="status-indicator" aria-hidden="true"></span>
+        <div id="status" class="status" data-status="warn">Starting...</div>
+      </div>
     </header>
     <main class="app-shell">
       <section id="repl-host" class="repl-host" aria-label="Strudel editor">
@@ -30,8 +34,8 @@
             <h2 id="agent-heading">Agent</h2>
             <p class="provider-summary">Provider: <span id="agent-provider-summary">loading...</span></p>
             <div class="agent-panel-actions">
-              <button id="reset-agent-context" class="agent-header-action" type="button" title="Clear conversation context">Reset context</button>
-              <button id="open-snapshots" class="snapshot-trigger" type="button" aria-label="Open snapshots">Snapshots <span id="snapshot-count">0</span></button>
+              <button id="reset-agent-context" class="icon-button agent-header-action" type="button" aria-label="Reset context" title="Clear conversation context"><i data-lucide="refresh-ccw"></i></button>
+              <button id="open-snapshots" class="snapshot-trigger" type="button" aria-label="Open snapshots"><i data-lucide="history"></i><span>Snapshots</span><strong id="snapshot-count">0</strong></button>
             </div>
           </div>
           <div id="agent-transcript" class="agent-transcript">
@@ -52,7 +56,7 @@
                     <div id="agent-question-options" class="agent-question-options" role="radiogroup"></div>
                     <textarea id="agent-question-answer" rows="2" aria-label="Clarification answer" placeholder="Your response"></textarea>
                   </fieldset>
-                  <div class="agent-question-actions"><button id="agent-question-submit" type="submit" disabled>Continue</button></div>
+                  <div class="agent-question-actions"><button id="agent-question-submit" class="control-primary" type="submit" disabled>Continue</button></div>
                 </form>
               </section>
               <div id="agent-result" class="agent-result" hidden>
@@ -65,16 +69,19 @@
           <form id="agent-form" class="agent-composer">
             <textarea id="agent-intent" rows="3" placeholder="Ask about the music or describe a change" required></textarea>
             <div class="agent-composer-controls">
-              <label class="auto-fire"><input id="auto-fire" type="checkbox"> Auto Fire</label>
-              <div class="agent-actions"><button id="stage-change" type="submit">Send</button><button id="cancel-change" type="button" hidden>Cancel</button><button id="undo-change" type="button" disabled>Undo</button></div>
+              <label class="toggle-control auto-fire"><input id="auto-fire" type="checkbox"><span class="toggle-track" aria-hidden="true"><span></span></span><span>Auto Fire</span></label>
+              <div class="agent-actions"><button id="stage-change" class="control-primary" type="submit"><i data-lucide="send"></i><span>Send</span></button><button id="cancel-change" class="button-secondary" type="button" hidden>Cancel</button><button id="undo-change" class="icon-button" type="button" aria-label="Undo" title="Undo applied change" disabled><i data-lucide="undo-2"></i></button></div>
             </div>
           </form>
         </section>
-        <h2>Track</h2>
-        <p><code>tracks/main.strudel.js</code></p>
-        <p>Evaluate fires the Strudel REPL, then saves a snapshot only if evaluation succeeds.</p>
-        <h2>Samples</h2>
-        <div id="sample-list" class="sample-list" aria-live="polite"></div>
+        <section class="project-section" aria-labelledby="track-heading">
+          <h2 id="track-heading">Track</h2>
+          <p><code>tracks/main.strudel.js</code></p>
+        </section>
+        <section class="project-section" aria-labelledby="samples-heading">
+          <h2 id="samples-heading">Samples</h2>
+          <div id="sample-list" class="sample-list" aria-live="polite"></div>
+        </section>
       </aside>
     </main>
     <dialog id="snapshots-dialog" class="snapshot-drawer" aria-labelledby="snapshots-heading">
@@ -84,7 +91,7 @@
             <h2 id="snapshots-heading">Snapshots</h2>
             <p>Evaluation history</p>
           </div>
-          <button id="close-snapshots" type="button" aria-label="Close snapshots">Close</button>
+          <button id="close-snapshots" class="icon-button" type="button" aria-label="Close snapshots" title="Close snapshots"><i data-lucide="x"></i></button>
         </div>
         <div id="snapshot-list" class="snapshot-list" aria-live="polite">No snapshots yet.</div>
       </div>
@@ -93,12 +100,12 @@
       <form id="settings-form" class="settings-form">
         <div class="dialog-heading">
           <h2 id="settings-heading">Agent settings</h2>
-          <button id="close-settings" type="button" aria-label="Close settings">Close</button>
+          <button id="close-settings" class="icon-button" type="button" aria-label="Close settings" title="Close settings"><i data-lucide="x"></i></button>
         </div>
-        <label>Provider<select id="settings-provider"></select></label>
-        <label>Model<input id="settings-model" type="text" placeholder="Use provider default"></label>
-        <label>API key<input id="settings-api-key" type="password" autocomplete="off" placeholder="Not required"></label>
-        <label class="remember-key"><input id="settings-remember-key" type="checkbox"> Remember on this device</label>
+        <label><span>Provider</span><select id="settings-provider"></select></label>
+        <label><span>Model</span><input id="settings-model" type="text" placeholder="Use provider default"></label>
+        <label><span>API key</span><input id="settings-api-key" type="password" autocomplete="off" placeholder="Not required"></label>
+        <label class="toggle-control remember-key"><input id="settings-remember-key" type="checkbox"><span class="toggle-track" aria-hidden="true"><span></span></span><span>Remember on this device</span></label>
         <details class="settings-advanced">
           <summary>Runtime limits</summary>
           <div class="settings-runtime-grid">
@@ -108,14 +115,14 @@
             <label>Output tokens per turn<input id="settings-max-output-tokens" type="number" min="1" step="1" required></label>
           </div>
           <div class="settings-runtime-footer">
-            <label class="unlimited-tokens"><input id="settings-unlimited-total-tokens" type="checkbox"> Unlimited total tokens</label>
-            <button id="reset-runtime-limits" type="button">Restore defaults</button>
+            <label class="toggle-control unlimited-tokens"><input id="settings-unlimited-total-tokens" type="checkbox"><span class="toggle-track" aria-hidden="true"><span></span></span><span>Unlimited total tokens</span></label>
+            <button id="reset-runtime-limits" class="button-quiet" type="button">Restore defaults</button>
           </div>
         </details>
         <div class="settings-actions">
-          <button id="test-provider" type="button">Test connection</button>
-          <button id="clear-api-key" type="button">Clear key</button>
-          <button type="submit">Save</button>
+          <button id="test-provider" class="button-secondary" type="button">Test connection</button>
+          <button id="clear-api-key" class="button-quiet" type="button">Clear key</button>
+          <button class="control-primary" type="submit">Save</button>
         </div>
         <p id="settings-message" class="settings-message" aria-live="polite"></p>
       </form>
